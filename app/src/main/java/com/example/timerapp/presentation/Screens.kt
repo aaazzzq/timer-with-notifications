@@ -23,6 +23,9 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.Text as M3Text // Keep alias for clarity
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip // <<< ADD THIS LINE
+import androidx.compose.foundation.shape.CircleShape // <<< ADD THIS LINE
+import androidx.wear.compose.material.ButtonDefaults
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -558,6 +561,7 @@ fun EditTimerScreen(
 // enum class CueType { VIBRATION, SOUND, BOTH } // Assuming BOTH might be needed based on ViewModel
 // interface TimerViewModel { ... }
 /* ---------- ActiveTimerScreen ---------- */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ActiveTimerScreen(
     vm: TimerViewModel,
@@ -570,39 +574,26 @@ fun ActiveTimerScreen(
         if (state == null && presetId != null) vm.startTimer(presetId)
     }
 
-    // Handle case where timer finishes or is cancelled externally
     LaunchedEffect(state) {
-        // Navigate back if the timer associated with *this screen instance* finishes.
-        // Check presetId from argument against state's preset id.
         if (presetId != null && state?.preset?.id == presetId && state?.millisRemaining == 0L) {
-            onDone() // Automatically navigate back when timer finishes
+            onDone()
         }
-        // Also navigate back if state becomes null while this screen is active
-        // (e.g., timer cancelled from notification)
-        // Optional: Add check ` && state == null` if needed, but finish check might be enough
-        // if (presetId != null && state?.preset?.id == presetId && state == null) {
-        //    onDone()
-        // }
     }
 
-    // Display data, using 0 if state is null initially or after cancellation
     val rem = state?.millisRemaining ?: 0L
     val mm = (rem / 60000).toInt()
     val ss = (rem % 60000 / 1000).toInt()
     val isRunning = state?.isRunning == true
-    val initialDuration = state?.preset?.durationMillis ?: 1L // Avoid division by zero
+    val initialDuration = state?.preset?.durationMillis ?: 1L
 
-    // Get the Wear Material theme's colors and typography
-    val colors = androidx.wear.compose.material.MaterialTheme.colors
-    val typography = androidx.wear.compose.material.MaterialTheme.typography
+    val colors = WearMaterialTheme.colors
+    val typography = WearMaterialTheme.typography
 
     Scaffold(
         timeText = {
-            // Show TimeText only if timer is running or paused
             if (state != null) TimeText(modifier = Modifier.padding(top = 8.dp))
         },
         positionIndicator = {
-            // Show a progress indicator
             if (state != null && initialDuration > 0) {
                 PositionIndicator(
                     value = { (initialDuration - rem).toFloat() / initialDuration.toFloat() },
@@ -616,33 +607,62 @@ fun ActiveTimerScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // --- Use Wear Text and Wear Typography ---
-            Text( // Changed from M3Text
+            Text(
                 text = "%02d:%02d".format(mm, ss),
-                color = colors.onBackground, // Explicitly use Wear theme color (usually white/light grey)
-                style = typography.display1 // Use Wear typography (display1 is large)
+                color = colors.onBackground,
+                style = typography.display1
             )
-            // -----------------------------------------
 
-            Spacer(Modifier.height(16.dp)) // Increased spacing a bit
+            Spacer(Modifier.height(16.dp))
 
-            Row {
-                // Pause/Resume Button
-                Button( // wear.compose.material.Button
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Pause/Resume Button (Stays as a Button)
+                Button(
                     onClick = { vm.pauseOrResume() },
-                    enabled = state != null && rem > 0 // Enable only if active and not finished
+                    modifier = Modifier.size(ButtonDefaults.LargeButtonSize),
+                    enabled = state != null && rem > 0,
+                    colors = ButtonDefaults.buttonColors()
                 ) {
-                    Text(if (isRunning) "Pause" else "Resume") // wear.compose.material.Text
+                    Text(if (isRunning) "Pause" else "Resume")
                 }
-                Spacer(Modifier.width(8.dp))
-                // Cancel Button
-                Button( // wear.compose.material.Button
-                    onClick = { vm.cancelTimer(); onDone() },
-                    // Disable cancel if timer hasn't started or already finished
-                    enabled = state != null
+
+                Spacer(Modifier.width(12.dp))
+
+                // --- VVV Cancel Button Replaced with Box VVV ---
+                val cancelEnabled = state != null
+                // Define colors based on enabled state
+                val cancelBackgroundColor = if (cancelEnabled) colors.error else colors.error.copy(alpha = 0.3f)
+                val cancelContentColor = if (cancelEnabled) colors.onError else colors.onError.copy(alpha = 0.5f)
+
+                Box( // Use a Box instead of Button
+                    modifier = Modifier
+                        .size(ButtonDefaults.LargeButtonSize) // Make the Box button-sized
+                        .clip(CircleShape) // Clip it to a circle like a button
+                        .background(cancelBackgroundColor) // Apply the red/disabled background
+                        .combinedClickable( // Apply interaction directly to the Box
+                            enabled = cancelEnabled, // Control gesture detection
+                            onClick = {
+                                Log.d("ActiveTimerScreen", "Cancel Box tapped (ignored)")
+                                // Do nothing on short click
+                            },
+                            onLongClick = {
+                                Log.d("ActiveTimerScreen", "Cancel Box long-pressed")
+                                vm.cancelTimer()
+                                onDone()
+                            }
+                        ),
+                    contentAlignment = Alignment.Center // Center the Text inside the Box
                 ) {
-                    Text("Cancel") // wear.compose.material.Text
+                    Text(
+                        text = "Cancel",
+                        color = cancelContentColor // Use the determined content color
+                    )
                 }
+                // --- ^^^ End of Cancel Box ^^^ ---
             }
         }
     }
