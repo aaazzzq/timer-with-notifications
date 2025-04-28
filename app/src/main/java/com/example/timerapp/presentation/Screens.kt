@@ -3,16 +3,26 @@ package com.example.timerapp.presentation
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons // <-- IMPORT ADDED
+import androidx.compose.material.icons.filled.Add // <-- IMPORT ADDED
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api // <-- IMPORT ADDED
+import androidx.compose.material3.MaterialTheme // Make sure this is androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton // <-- IMPORT ADDED
+import androidx.compose.material3.SegmentedButtonDefaults // <-- IMPORT ADDED
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow // <-- IMPORT ADDED
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.Text as M3Text // Keep alias for clarity
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.items
-import androidx.wear.compose.material.*   // Chip, Button, Card, Picker, etc.
+import androidx.wear.compose.foundation.lazy.itemsIndexed
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.material.* // Imports Wear Text, Card, Chip, Icon, Picker, etc.
 
 /* ---------- HomeScreen ---------- */
 @OptIn(ExperimentalFoundationApi::class)
@@ -24,176 +34,452 @@ fun HomeScreen(
     onStart: (Long) -> Unit
 ) {
     val presets by vm.presets.collectAsState()
+    val listState = rememberScalingLazyListState()
 
     Scaffold(
         timeText = { TimeText() },
-        vignette = { Vignette(VignettePosition.TopAndBottom) }
+        vignette = { Vignette(VignettePosition.TopAndBottom) },
+        positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
     ) {
         if (presets.isEmpty()) {
             Box(Modifier.fillMaxSize(), Alignment.Center) {
-                Text("No timers yet", textAlign = TextAlign.Center)
+                Text("No timers yet", textAlign = TextAlign.Center) // wear.compose.material.Text
             }
         } else {
-            ScalingLazyColumn {
-                items(presets, key = { it.id }) { preset ->
-                    Card(
+            ScalingLazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(vertical = 24.dp)
+            ) {
+                itemsIndexed(presets, key = { _, preset -> preset.id }) { _, preset ->
+                    Card( // wear.compose.material.Card
                         onClick = { onStart(preset.id) },
-                        modifier = Modifier.combinedClickable(
-                            onClick     = { onStart(preset.id) },
-                            onLongClick = { onEdit(preset.id) }
-                        )
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(
+                                onClick = { onStart(preset.id) },
+                                onLongClick = { onEdit(preset.id) }
+                            )
                     ) {
-                        Text("${preset.label}: ${preset.durationMillis / 60000} min")
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(preset.label, Modifier.weight(1f)) // wear.compose.material.Text
+                            Text("${preset.durationMillis / 60000} m") // wear.compose.material.Text
+                        }
                     }
                 }
             }
         }
 
-        /* Bottom-anchored action chip */
         Box(Modifier.fillMaxSize(), Alignment.BottomCenter) {
-            Chip(
-                label       = { Text("New") },
-                onClick     = onCreate,
-                icon        = { Icon(Icons.Filled.Add, contentDescription = null) },
-                colors      = ChipDefaults.primaryChipColors()
+            Chip( // wear.compose.material.Chip
+                label = { Text("New") }, // wear.compose.material.Text
+                onClick = onCreate,
+                icon = { Icon(Icons.Default.Add, contentDescription = null) }, // wear.compose.material.Icon
+                colors = ChipDefaults.primaryChipColors()
             )
         }
     }
 }
 
 /* ---------- EditTimerScreen ---------- */
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun EditTimerScreen(vm: TimerViewModel, presetId: Long?, onDone: () -> Unit) {
-    // Use mutableIntStateOf for primitive types like Int - addresses the lint warning
-    var minutes by remember { mutableIntStateOf(1) }
-    var label   by remember { mutableStateOf("") }
-    var cues    by remember { mutableStateOf(listOf<NotificationCue>()) }
+fun EditTimerScreen(
+    vm: TimerViewModel,
+    presetId: Long?,
+    onDone: () -> Unit
+) {
+    // State for hours and minutes separately
+    var hours by remember { mutableIntStateOf(0) }
+    var minutes by remember { mutableIntStateOf(1) } // Default to 1 min if new
+    var label by remember { mutableStateOf("") }
+    var cues by remember { mutableStateOf(listOf<NotificationCue>()) }
+    var showDialog by remember { mutableStateOf(false) }
 
+    // Load existing preset data
     LaunchedEffect(presetId) {
         vm.presets.value.firstOrNull { it.id == presetId }?.let { p ->
-            label   = p.label
-            minutes = (p.durationMillis / 60000).toInt()
-            cues    = p.cues
+            label = p.label
+            val totalMinutes = p.durationMillis / 60000L
+            hours = (totalMinutes / 60).toInt()
+            minutes = (totalMinutes % 60).toInt()
+            cues = p.cues
         }
     }
 
-    // Define the range of options for the picker
-    val minuteOptions = remember { (1..120).toList() }
+    val listState = rememberScalingLazyListState()
+    // Options for the pickers
+    val hourOptions = remember { (0..23).toList() }
+    val minuteOptions = remember { (0..59).toList() }
 
-    ScalingLazyColumn(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxSize() // Added for better layout often
+    Scaffold(
+        timeText = { TimeText() },
+        vignette = { Vignette(VignettePosition.TopAndBottom) },
+        positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
     ) {
-        /* duration picker – Corrected API usage */
-        item {
-            Spacer(Modifier.height(16.dp)) // Add some spacing
-            Text("Duration (minutes)")
-            Spacer(Modifier.height(8.dp)) // Add some spacing
-
-            // Calculate the initial index based on the current 'minutes' value
-            // Ensure the index is valid even if 'minutes' is somehow outside 1-120
-            val initialIndex = (minutes - 1).coerceIn(0, minuteOptions.size - 1)
-
-            val pickerState = rememberPickerState(
-                initialNumberOfOptions = minuteOptions.size,
-                initiallySelectedOption = initialIndex
-            )
-
-            // Update the 'minutes' state when the picker selection changes
-            LaunchedEffect(pickerState.selectedOption) {
-                // selectedOption is the INDEX, add 1 to get the minute value (since range starts at 1)
-                minutes = pickerState.selectedOption + 1
+        ScalingLazyColumn(
+            state = listState,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            contentPadding = PaddingValues(top = 36.dp, bottom = 80.dp) // Increased bottom padding for Chip
+        ) {
+            // Label field (remains the same)
+            item {
+                TextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    placeholder = { M3Text("Label") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .padding(bottom = 12.dp)
+                )
             }
 
-            Picker(
-                state = pickerState,
-                modifier = Modifier.height(100.dp) // Give the picker some explicit height
-            ) { optionIndex ->
-                // Display the actual minute value (index + 1)
-                Text("${optionIndex + 1}")
-            }
-            Spacer(Modifier.height(16.dp)) // Add some spacing
-        }
+            // Duration Pickers (Hours and Minutes)
+            item {
+                Text("Duration") // Changed text
+                Spacer(Modifier.height(8.dp)) // Add some space
 
-        // TODO: Add Label TextField item here if needed
-        // item { OutlinedTextField(...) }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f) // Match text field width
+                        .height(110.dp), // Keep height for pickers
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    // Hours Picker
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f) // Take half the space
+                    ) {
+                        Text("Hours")
+                        val hourPickerState = rememberPickerState(
+                            initialNumberOfOptions = hourOptions.size,
+                            initiallySelectedOption = hourOptions.indexOf(hours).coerceAtLeast(0)
+                        )
+                        // Update hours state when picker changes
+                        LaunchedEffect(hourPickerState.selectedOption) {
+                            hours = hourOptions[hourPickerState.selectedOption]
+                        }
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            // Warning: Picker is deprecated
+                            Picker(
+                                state = hourPickerState,
+                                modifier = Modifier.fillMaxWidth() // Fill the column width
+                            ) { h -> Text("$h") }
+                        }
+                    }
 
-        /* cue list */
-        items(cues.withIndex().toList()) { (idx, cue) ->
-            Card(onClick = {
-                cues = cues.toMutableList().also { list ->
-                    list[idx] = cue.copy(
-                        type = if (cue.type == CueType.SOUND) CueType.VIBRATION else CueType.SOUND
-                    )
+                    Spacer(Modifier.width(16.dp)) // Space between pickers
+
+                    // Minutes Picker
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f) // Take half the space
+                    ) {
+                        Text("Minutes")
+                        val minutePickerState = rememberPickerState(
+                            initialNumberOfOptions = minuteOptions.size,
+                            initiallySelectedOption = minuteOptions.indexOf(minutes).coerceAtLeast(0)
+                        )
+                        // Update minutes state when picker changes
+                        LaunchedEffect(minutePickerState.selectedOption) {
+                            minutes = minuteOptions[minutePickerState.selectedOption]
+                        }
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            // Warning: Picker is deprecated
+                            Picker(
+                                state = minutePickerState,
+                                modifier = Modifier.fillMaxWidth() // Fill the column width
+                            ) { m -> Text("%02d".format(m)) } // Format minutes with leading zero
+                        }
+                    }
                 }
-            }) {
-                // Provide padding inside the card for better appearance
-                Text(
-                    "-${cue.offsetMillis / 60000} m · ${cue.type}",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                )
+                Spacer(Modifier.height(12.dp)) // Space after pickers
             }
-            Spacer(Modifier.height(4.dp)) // Add space between cue cards
+
+
+            // Cues list (remains the same)
+            itemsIndexed(cues) { idx, cue ->
+                Card(
+                    onClick = { /* future edit */ },
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f) // Consistent width
+                        .combinedClickable(
+                            onClick = { /* future edit */ },
+                            onLongClick = { cues = cues.toMutableList().also { it.removeAt(idx) } }
+                        )
+                ) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Calculate offset display based on total duration
+                        val totalDurationMillis = (hours * 60L + minutes) * 60000L
+                        val displayOffsetMinutes = (totalDurationMillis - cue.offsetMillis) / 60000L
+                        Text("-$displayOffsetMinutes m", Modifier.weight(1f)) // Display offset from end
+                        Text("${cue.type} ×${cue.repeats}")
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+
+            // Save button (update duration calculation)
+            item {
+                Button(
+                    onClick = {
+                        // Calculate total duration in milliseconds from hours and minutes
+                        val totalMillis = (hours * 60L + minutes) * 60_000L
+                        // Prevent saving a 0 duration timer
+                        if (totalMillis > 0) {
+                            vm.addOrUpdate(
+                                TimerPreset(
+                                    id = presetId ?: System.currentTimeMillis(),
+                                    label = label.ifBlank { "Timer ${hours}h ${minutes}m" }, // Updated default label
+                                    durationMillis = totalMillis, // Use calculated total duration
+                                    cues = cues
+                                )
+                            )
+                            onDone()
+                        } else {
+                            // Optionally show a message that duration must be > 0
+                        }
+                    },
+                    modifier = Modifier.padding(top = 16.dp),
+                    // Disable save if total duration is zero
+                    enabled = (hours > 0 || minutes > 0)
+                ) {
+                    Text("Save")
+                }
+            }
         }
 
-        item {
-            Spacer(Modifier.height(8.dp)) // Add space before buttons
-            Button(onClick = {
-                // Calculate offset based on the *current* duration, not just size+1
-                val newOffset = minutes * 60_000L - 60_000L * (cues.size + 1)
-                cues += NotificationCue(
-                    // Ensure offset is not negative and relative to the end
-                    offsetMillis = maxOf(0L, newOffset),
-                    type         = CueType.VIBRATION
-                )
-            }) { Text("Add cue (-1 min)") } // Clarify button action if offset logic is complex
-            Spacer(Modifier.height(8.dp)) // Add space between buttons
-        }
-
-        item {
-            Button(onClick = {
-                vm.addOrUpdate(
-                    TimerPreset(
-                        id             = presetId ?: System.currentTimeMillis(),
-                        label          = label.ifBlank { "Timer" },
-                        durationMillis = minutes * 60_000L,
-                        cues           = cues
-                    )
-                )
-                onDone()
-            }) { Text("Save") }
-            Spacer(Modifier.height(16.dp)) // Add some bottom padding
+        // +Cue chip (Update text)
+        Box(Modifier.fillMaxSize(), Alignment.BottomCenter) {
+            Chip(
+                label = { Text("New Signal") }, // <-- TEXT CHANGED HERE
+                onClick = { showDialog = true },
+                icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                colors = ChipDefaults.primaryChipColors(),
+                // Disable adding cues if duration is 0
+                enabled = (hours > 0 || minutes > 0)
+            )
         }
     }
+
+    // Cue dialog (Update offset logic based on total duration)
+    if (showDialog) {
+        var offset by remember { mutableIntStateOf(1) } // Offset in minutes before the end
+        var repeats by remember { mutableIntStateOf(1) }
+        var type by remember { mutableStateOf(CueType.VIBRATION) }
+
+        // Calculate total duration in minutes for the dialog logic
+        val totalDurationMinutes = remember(hours, minutes) { hours * 60 + minutes }
+
+        // --- DECLARE offsetOptions HERE, outside the 'text' lambda ---
+        val maxOffsetMinutes = remember(totalDurationMinutes) { maxOf(1, totalDurationMinutes - 1) }
+        val offsetOptions = remember(maxOffsetMinutes) { (1..maxOffsetMinutes).toList() }
+        // -------------------------------------------------------------
+
+        AlertDialog( // material3.AlertDialog
+            onDismissRequest = { showDialog = false },
+            title = { M3Text("New cue") }, // material3.Text
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Offset picker (max offset depends on total duration)
+                    M3Text("When (minutes before end):") // material3.Text
+
+                    // Now just use the offsetOptions declared outside
+                    if (offsetOptions.isNotEmpty()) {
+                        val offState = rememberPickerState(
+                            initialNumberOfOptions = offsetOptions.size,
+                            initiallySelectedOption = (offset - 1).coerceIn(0, offsetOptions.size - 1)
+                        )
+                        // Update offset state when picker changes
+                        // Make sure offset actually uses the value from the list index
+                        LaunchedEffect(offState.selectedOption) {
+                            offset = offsetOptions[offState.selectedOption.coerceIn(0, offsetOptions.size - 1)]
+                        }
+
+                        Box(
+                            Modifier.height(80.dp).fillMaxWidth(),
+                            Alignment.Center
+                        ) {
+                            // Warning: Picker is deprecated
+                            Picker(state = offState) { i -> Text("${offsetOptions[i]} min") } // wear.compose.material.Picker & Text
+                        }
+                    } else {
+                        M3Text("Duration too short for offset cues.")
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Type selector (remains the same)
+                    SingleChoiceSegmentedButtonRow( // <-- CHANGED to SingleChoice...
+                        modifier = Modifier.fillMaxWidth(0.9f) // <-- Added modifier
+                    ) {
+                        // Use Enum.entries <-- CHANGED from .values()
+                        CueType.entries.forEachIndexed { index, ct ->
+                            SegmentedButton( // material3.SegmentedButton
+                                // Use 'selected' and 'onClick' <-- CHANGED parameters
+                                selected = ct == type,
+                                onClick = { type = ct },
+                                // Shape is required for SegmentedButton inside SingleChoice...Row
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = CueType.entries.size) // <-- ADDED shape
+                            ) {
+                                // This Text call should now be fine
+                                M3Text(ct.name.first().toString()) // Use M3Text for consistency in M3 component
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Repeats picker (remains the same)
+                    M3Text("Repeats:") // material3.Text
+                    val repeatOptions = remember { (1..5).toList() } // Explicit options
+                    val repState = rememberPickerState(
+                        initialNumberOfOptions = repeatOptions.size,
+                        initiallySelectedOption = (repeats - 1).coerceIn(0, repeatOptions.size - 1)
+                    )
+                    // Update repeats state when picker changes
+                    // Make sure repeats actually uses the value from the list index
+                    LaunchedEffect(repState.selectedOption) {
+                        repeats = repeatOptions[repState.selectedOption.coerceIn(0, repeatOptions.size - 1)]
+                    }
+                    Box( Modifier.height(80.dp).fillMaxWidth(), Alignment.Center) {
+                        // Warning: Picker is deprecated
+                        Picker(state = repState) { i -> Text("${repeatOptions[i]}") } // wear.compose.material.Picker & Text
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        // Calculate offset in milliseconds *from the start* for storage,
+                        // but based on user selection (minutes from end)
+                        val totalMillis = totalDurationMinutes * 60_000L
+                        val offsetFromEndMillis = offset * 60_000L // Use the current 'offset' state variable
+                        val actualOffsetMillis = (totalMillis - offsetFromEndMillis).coerceAtLeast(0L) // Offset from start
+
+                        // Add the cue using the calculated offset from start
+                        cues = cues + NotificationCue(offsetMillis = actualOffsetMillis, type = type, repeats = repeats)
+                        showDialog = false
+                    },
+                    // Disable adding if duration is too short for offsets
+                    // Now offsetOptions is in scope!
+                    enabled = offsetOptions.isNotEmpty()
+                ) {
+                    M3Text("Add") // material3.Text
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) { // material3.TextButton
+                    M3Text("Cancel") // material3.Text
+                }
+            }
+        )
+    } // End of if(showDialog)
 }
 
+// --- Remember to have these defined elsewhere in your project ---
+// data class TimerPreset(val id: Long, val label: String, val durationMillis: Long, val cues: List<NotificationCue>)
+// @Serializable // Add if not already present
+// data class NotificationCue(val offsetMillis: Long, val type: CueType, val repeats: Int)
+// @Serializable // Add if not already present
+// enum class CueType { VIBRATION, SOUND, BOTH } // Assuming BOTH might be needed based on ViewModel
+// interface TimerViewModel { ... }
 /* ---------- ActiveTimerScreen ---------- */
 @Composable
-fun ActiveTimerScreen(vm: TimerViewModel, presetId: Long?, onDone: () -> Unit) {
+fun ActiveTimerScreen(
+    vm: TimerViewModel,
+    presetId: Long?,
+    onDone: () -> Unit
+) {
     val state by vm.active.collectAsState()
 
     LaunchedEffect(presetId) {
         if (state == null && presetId != null) vm.startTimer(presetId)
     }
 
-    val rem = state?.millisRemaining ?: 0L
-    val mm  = (rem / 60000).toInt()
-    val ss  = (rem % 60000 / 1000).toInt()
+    // Handle case where timer finishes or is cancelled externally
+    LaunchedEffect(state) {
+        // Navigate back if the timer associated with *this screen instance* finishes.
+        // Check presetId from argument against state's preset id.
+        if (presetId != null && state?.preset?.id == presetId && state?.millisRemaining == 0L) {
+            onDone() // Automatically navigate back when timer finishes
+        }
+        // Also navigate back if state becomes null while this screen is active
+        // (e.g., timer cancelled from notification)
+        // Optional: Add check ` && state == null` if needed, but finish check might be enough
+        // if (presetId != null && state?.preset?.id == presetId && state == null) {
+        //    onDone()
+        // }
+    }
 
-    Scaffold(timeText = { TimeText() }) {
+    // Display data, using 0 if state is null initially or after cancellation
+    val rem = state?.millisRemaining ?: 0L
+    val mm = (rem / 60000).toInt()
+    val ss = (rem % 60000 / 1000).toInt()
+    val isRunning = state?.isRunning == true
+    val initialDuration = state?.preset?.durationMillis ?: 1L // Avoid division by zero
+
+    // Get the Wear Material theme's colors and typography
+    val colors = androidx.wear.compose.material.MaterialTheme.colors
+    val typography = androidx.wear.compose.material.MaterialTheme.typography
+
+    Scaffold(
+        timeText = {
+            // Show TimeText only if timer is running or paused
+            if (state != null) TimeText(modifier = Modifier.padding(top = 8.dp))
+        },
+        positionIndicator = {
+            // Show a progress indicator
+            if (state != null && initialDuration > 0) {
+                PositionIndicator(
+                    value = { (initialDuration - rem).toFloat() / initialDuration.toFloat() },
+                    modifier = Modifier
+                )
+            }
+        }
+    ) {
         Column(
             Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("%02d:%02d".format(mm, ss), style = MaterialTheme.typography.title1)
+            // --- Use Wear Text and Wear Typography ---
+            Text( // Changed from M3Text
+                text = "%02d:%02d".format(mm, ss),
+                color = colors.onBackground, // Explicitly use Wear theme color (usually white/light grey)
+                style = typography.display1 // Use Wear typography (display1 is large)
+            )
+            // -----------------------------------------
+
+            Spacer(Modifier.height(16.dp)) // Increased spacing a bit
+
             Row {
-                Button(onClick = { vm.pauseOrResume() }) {
-                    Text(if (state?.isRunning == true) "Pause" else "Resume")
+                // Pause/Resume Button
+                Button( // wear.compose.material.Button
+                    onClick = { vm.pauseOrResume() },
+                    enabled = state != null && rem > 0 // Enable only if active and not finished
+                ) {
+                    Text(if (isRunning) "Pause" else "Resume") // wear.compose.material.Text
                 }
                 Spacer(Modifier.width(8.dp))
-                Button(onClick = { vm.cancelTimer(); onDone() }) {
-                    Text("Cancel")
+                // Cancel Button
+                Button( // wear.compose.material.Button
+                    onClick = { vm.cancelTimer(); onDone() },
+                    // Disable cancel if timer hasn't started or already finished
+                    enabled = state != null
+                ) {
+                    Text("Cancel") // wear.compose.material.Text
                 }
             }
         }

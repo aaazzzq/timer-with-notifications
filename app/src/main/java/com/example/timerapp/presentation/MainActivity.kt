@@ -29,7 +29,9 @@ class MainActivity : ComponentActivity() {
                             onStart  = { id -> navController.navigate("active/$id") }
                         )
                     }
-                    composable("create")  { EditTimerScreen(vm, null)            { navController.popBackStack() } }
+                    composable("create")  {
+                        EditTimerScreen(vm, null) { navController.popBackStack() }
+                    }
                     composable("edit/{id}") { back ->
                         val id = back.arguments?.getString("id")?.toLongOrNull()
                         EditTimerScreen(vm, id) { navController.popBackStack() }
