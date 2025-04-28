@@ -5,8 +5,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons // <-- IMPORT ADDED
 import androidx.compose.material.icons.filled.Add // <-- IMPORT ADDED
 import androidx.compose.material3.AlertDialog
@@ -94,12 +97,43 @@ fun HomeScreen(
         }
 
         Box(Modifier.fillMaxSize(), Alignment.BottomCenter) {
-            Chip( // wear.compose.material.Chip
-                label = { Text("New") }, // wear.compose.material.Text
-                onClick = onCreate,
-                icon = { Icon(Icons.Default.Add, contentDescription = null) }, // wear.compose.material.Icon
-                colors = ChipDefaults.primaryChipColors()
-            )
+            // --- CHIP DELETED ---
+            // Chip(
+            //     label = { Text("New") },
+            //     onClick = onCreate,
+            //     icon = { Icon(Icons.Default.Add, contentDescription = null) },
+            //     colors = ChipDefaults.primaryChipColors()
+            // )
+
+            // --- ROW ADDED ---
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth() // Span the full width
+                    .height(48.dp) // Consistent height
+                    // Use primary color for background
+                    .background(WearMaterialTheme.colors.primary)
+                    // Use the onCreate lambda passed into HomeScreen
+                    .clickable(onClick = onCreate)
+                    // Add internal padding for the content
+                    .padding(horizontal = 16.dp),
+                // Center the Icon and Text vertically
+                verticalAlignment = Alignment.CenterVertically,
+                // Center the content horizontally
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "New Timer", // Provide a meaningful description
+                    // Ensure content color contrasts with background
+                    tint = WearMaterialTheme.colors.onPrimary
+                )
+                Spacer(Modifier.width(8.dp)) // Space between Icon and Text
+                Text(
+                    text = "New",
+                    // Ensure content color contrasts with background
+                    color = WearMaterialTheme.colors.onPrimary
+                )
+            }
         }
     }
 }
@@ -171,65 +205,67 @@ fun EditTimerScreen(
 
             // Duration Pickers (Hours and Minutes)
             item {
-                Text("Duration") // Changed text
-                Spacer(Modifier.height(8.dp)) // Add some space
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f) // Match text field width
-                        .height(110.dp), // Keep height for pickers
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                // Wrap Duration Text and Picker Row in a Column for better structure
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    // Apply the width modifier to this wrapper Column
+                    modifier = Modifier.fillMaxWidth(0.9f)
                 ) {
-                    // Hours Picker
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f) // Take half the space
-                    ) {
-                        Text("Hours")
-                        val hourPickerState = rememberPickerState(
-                            initialNumberOfOptions = hourOptions.size,
-                            initiallySelectedOption = hourOptions.indexOf(hours).coerceAtLeast(0)
-                        )
-                        // Update hours state when picker changes
-                        LaunchedEffect(hourPickerState.selectedOption) {
-                            hours = hourOptions[hourPickerState.selectedOption]
-                        }
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            // Warning: Picker is deprecated
-                            Picker(
-                                state = hourPickerState,
-                                modifier = Modifier.fillMaxWidth() // Fill the column width
-                            ) { h -> Text("$h") }
-                        }
-                    }
+                    // 1. Duration Text is now inside the wrapper Column
+                    Text("Duration")
+                    Spacer(Modifier.height(8.dp)) // Space between "Duration" and the pickers
 
-                    Spacer(Modifier.width(16.dp)) // Space between pickers
-
-                    // Minutes Picker
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f) // Take half the space
+                    // The Row containing the pickers remains largely the same
+                    Row(
+                        // Remove width modifier from Row, it's on the parent Column now
+                        // modifier = Modifier.fillMaxWidth(0.9f) // <<< REMOVE this line
+                        modifier = Modifier.height(110.dp), // Keep height
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
-                        Text("Minutes")
-                        val minutePickerState = rememberPickerState(
-                            initialNumberOfOptions = minuteOptions.size,
-                            initiallySelectedOption = minuteOptions.indexOf(minutes).coerceAtLeast(0)
-                        )
-                        // Update minutes state when picker changes
-                        LaunchedEffect(minutePickerState.selectedOption) {
-                            minutes = minuteOptions[minutePickerState.selectedOption]
+                        // Hours Picker Column (No structural changes inside)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Hours")
+                            // ... (rest of Hours Picker code) ...
+                            val hourPickerState = rememberPickerState(
+                                initialNumberOfOptions = hourOptions.size,
+                                initiallySelectedOption = hourOptions.indexOf(hours).coerceAtLeast(0)
+                            )
+                            LaunchedEffect(hourPickerState.selectedOption) {
+                                hours = hourOptions[hourPickerState.selectedOption]
+                            }
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Picker( state = hourPickerState, modifier = Modifier.fillMaxWidth()) { h -> Text("$h") }
+                            }
                         }
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            // Warning: Picker is deprecated
-                            Picker(
-                                state = minutePickerState,
-                                modifier = Modifier.fillMaxWidth() // Fill the column width
-                            ) { m -> Text("%02d".format(m)) } // Format minutes with leading zero
+
+                        Spacer(Modifier.width(16.dp))
+
+                        // Minutes Picker Column (No structural changes inside)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Minutes")
+                            // ... (rest of Minutes Picker code) ...
+                            val minutePickerState = rememberPickerState(
+                                initialNumberOfOptions = minuteOptions.size,
+                                initiallySelectedOption = minuteOptions.indexOf(minutes).coerceAtLeast(0)
+                            )
+                            LaunchedEffect(minutePickerState.selectedOption) {
+                                minutes = minuteOptions[minutePickerState.selectedOption]
+                            }
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Picker( state = minutePickerState, modifier = Modifier.fillMaxWidth()) { m -> Text("%02d".format(m)) }
+                            }
                         }
-                    }
-                }
-                Spacer(Modifier.height(12.dp)) // Space after pickers
+                    } // End Row
+                } // End wrapper Column
+
+                Spacer(Modifier.height(12.dp)) // Space after the picker section
             }
 
 
@@ -293,8 +329,11 @@ fun EditTimerScreen(
                             // Optionally show a message that duration must be > 0
                         }
                     },
-                    modifier = Modifier.padding(top = 16.dp),
-                    // Disable save if total duration is zero
+                    modifier = Modifier
+                        // Keep existing padding if you like the space above
+                        .padding(top = 16.dp)
+                        // ADD this line to make the button wide
+                        .fillMaxWidth(0.9f),                     // Disable save if total duration is zero
                     enabled = (hours > 0 || minutes > 0)
                 ) {
                     Text("Save")
@@ -315,6 +354,7 @@ fun EditTimerScreen(
                             contentColor = WearMaterialTheme.colors.onError
                         ),
                         // REMOVE the modifier parameter from here:
+                        modifier = Modifier.fillMaxWidth(0.9f)
                         // modifier = Modifier.padding(bottom = 8.dp) // <<< DELETE THIS LINE
                     ) {
                         Text("Delete")
@@ -327,14 +367,42 @@ fun EditTimerScreen(
 
         // +Cue chip (Update text)
         Box(Modifier.fillMaxSize(), Alignment.BottomCenter) {
-            Chip(
-                label = { Text("New Signal") }, // <-- TEXT CHANGED HERE
-                onClick = { showDialog = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                colors = ChipDefaults.primaryChipColors(),
-                // Disable adding cues if duration is 0
-                enabled = (hours > 0 || minutes > 0)
-            )
+            // Determine enabled state first for clarity
+            val isActionEnabled = (hours > 0 || minutes > 0)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth() // Span the full width
+                    .height(48.dp) // Set a fixed height (adjust as needed)
+                    // Use primary color for background like the Chip did
+                    .background(WearMaterialTheme.colors.primary)
+                    // Apply click listener and enabled state
+                    .clickable(
+                        enabled = isActionEnabled,
+                        onClick = { showDialog = true }
+                    )
+                    // Adjust alpha based on enabled state for visual feedback
+                    .alpha(if (isActionEnabled) 1f else 0.6f)
+                    // Add internal padding for the content
+                    .padding(horizontal = 16.dp),
+                // Center the Icon and Text vertically within the Row's height
+                verticalAlignment = Alignment.CenterVertically,
+                // Center the content horizontally within the Row
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "New Signal", // Add description
+                    // Ensure content color contrasts with background
+                    tint = WearMaterialTheme.colors.onPrimary
+                )
+                Spacer(Modifier.width(8.dp)) // Space between Icon and Text
+                Text(
+                    text = "New Signal",
+                    // Ensure content color contrasts with background
+                    color = WearMaterialTheme.colors.onPrimary
+                )
+            }
         }
     }
 
