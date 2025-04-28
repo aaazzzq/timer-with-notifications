@@ -1,5 +1,9 @@
 package com.example.timerapp.presentation
 
+import android.util.Log
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -23,9 +27,12 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.itemsIndexed
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.* // Imports Wear Text, Card, Chip, Icon, Picker, etc.
+import androidx.compose.material3.MaterialTheme as M3MaterialTheme
+import androidx.wear.compose.material.ButtonDefaults as WearButtonDefaults // Alias Wear Button Defaults
+import androidx.wear.compose.material.MaterialTheme as WearMaterialTheme // Alias Wear Theme
 
 /* ---------- HomeScreen ---------- */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class) // <<< Essential for combinedClickable
 @Composable
 fun HomeScreen(
     vm: TimerViewModel,
@@ -51,25 +58,37 @@ fun HomeScreen(
                 contentPadding = PaddingValues(vertical = 24.dp)
             ) {
                 itemsIndexed(presets, key = { _, preset -> preset.id }) { _, preset ->
-                    Card( // wear.compose.material.Card
-                        onClick = { onStart(preset.id) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                onClick = { onStart(preset.id) },
-                                onLongClick = { onEdit(preset.id) }
-                            )
+                    // --- CHANGE HERE ---
+                    // Card still requires onClick, provide an empty lambda.
+                    Card(
+                        onClick = { /* Required by Wear Card, but logic is handled by Row now */ },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .padding(8.dp),
+                                // --- CHANGE HERE ---
+                                // Apply combinedClickable to the Row
+                                .combinedClickable(
+                                    onClick = {
+                                        Log.d("HomeScreen", "Row onClick triggered for preset ID: ${preset.id}")
+                                        // Call onStart (short tap)
+                                        onStart(preset.id)
+                                    },
+                                    onLongClick = {
+                                        Log.d("HomeScreen", "Row onLongClick triggered for preset ID: ${preset.id}")
+                                        // Call onEdit (long press)
+                                        onEdit(preset.id)
+                                    }
+                                )
+                                .padding(8.dp), // Keep padding on the Row
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(preset.label, Modifier.weight(1f)) // wear.compose.material.Text
-                            Text("${preset.durationMillis / 60000} m") // wear.compose.material.Text
+                            Text(preset.label, Modifier.weight(1f))
+                            Text("${preset.durationMillis / 60000} m")
                         }
                     }
+                    // --- END CHANGES for Card/Row ---
                 }
             }
         }
@@ -93,21 +112,32 @@ fun EditTimerScreen(
     presetId: Long?,
     onDone: () -> Unit
 ) {
+    Log.d("EditTimerScreen", "Received presetId: $presetId")
     // State for hours and minutes separately
     var hours by remember { mutableIntStateOf(0) }
     var minutes by remember { mutableIntStateOf(1) } // Default to 1 min if new
     var label by remember { mutableStateOf("") }
     var cues by remember { mutableStateOf(listOf<NotificationCue>()) }
     var showDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     // Load existing preset data
     LaunchedEffect(presetId) {
-        vm.presets.value.firstOrNull { it.id == presetId }?.let { p ->
-            label = p.label
-            val totalMinutes = p.durationMillis / 60000L
-            hours = (totalMinutes / 60).toInt()
-            minutes = (totalMinutes % 60).toInt()
-            cues = p.cues
+        // Only load if presetId is not null (i.e., we are editing)
+        if (presetId != null) {
+            vm.presets.value.firstOrNull { it.id == presetId }?.let { p ->
+                label = p.label
+                val totalMinutes = p.durationMillis / 60000L
+                hours = (totalMinutes / 60).toInt()
+                minutes = (totalMinutes % 60).toInt()
+                cues = p.cues
+            }
+        } else {
+            // Optionally reset fields if creating new after editing
+            hours = 0
+            minutes = 1
+            label = ""
+            cues = emptyList()
         }
     }
 
@@ -124,7 +154,7 @@ fun EditTimerScreen(
         ScalingLazyColumn(
             state = listState,
             horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(top = 36.dp, bottom = 80.dp) // Increased bottom padding for Chip
+            contentPadding = PaddingValues(top = 28.dp, bottom = 20.dp) // Increased bottom padding for Chip
         ) {
             // Label field (remains the same)
             item {
@@ -204,26 +234,38 @@ fun EditTimerScreen(
 
 
             // Cues list (remains the same)
-            itemsIndexed(cues) { idx, cue ->
+            itemsIndexed(
+                items = cues,
+                key = { index, cueItem -> cueItem.hashCode() + index } // Ensure unique key
+            ) { idx, cue ->
                 Card(
-                    onClick = { /* future edit */ },
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f) // Consistent width
-                        .combinedClickable(
-                            onClick = { /* future edit */ },
-                            onLongClick = { cues = cues.toMutableList().also { it.removeAt(idx) } }
-                        )
+                    onClick = {
+                        Log.d("EditTimerScreen", "Card onClick triggered for cue index: $idx")
+                        /* future edit */
+                    },
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                    // REMOVE .pointerInput from Card's modifier
                 ) {
                     Row(
                         Modifier
-                            .fillMaxWidth()
-                            .padding(8.dp),
+                            .fillMaxWidth() // Make Row fill Card
+                            .pointerInput(idx, cue) { // Keyed pointerInput on the Row
+                                detectTapGestures(
+                                    onLongPress = { _ ->
+                                        Log.d("EditTimerScreen", "ROW onLongPress triggered for cue index: $idx, cue: $cue") // Log LONG PRESS
+                                        cues = cues.toMutableList().apply { removeAt(idx) }
+                                    }
+                                    // Optional: onTap logging
+                                    // onTap = { Log.d("EditTimerScreen", "ROW onTap triggered for cue index: $idx") }
+                                )
+                            }
+                            .padding(8.dp), // Padding on Row
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Calculate offset display based on total duration
                         val totalDurationMillis = (hours * 60L + minutes) * 60000L
                         val displayOffsetMinutes = (totalDurationMillis - cue.offsetMillis) / 60000L
-                        Text("-$displayOffsetMinutes m", Modifier.weight(1f)) // Display offset from end
+                        Text("-$displayOffsetMinutes m", Modifier.weight(1f))
                         Text("${cue.type} ×${cue.repeats}")
                     }
                 }
@@ -258,7 +300,30 @@ fun EditTimerScreen(
                     Text("Save")
                 }
             }
+            if (presetId != null) {
+                Log.d("EditTimerScreen", "presetId ($presetId) is not null, attempting to compose Delete Button item...")
+                item {
+                    Spacer(Modifier.height(8.dp)) // Keep space ABOVE
+                    // Use Wear Button
+                    Button(
+                        onClick = {
+                            showDeleteConfirmDialog = true
+                            Log.d("EditTimerScreen", "Delete button clicked, showing dialog")
+                        },
+                        colors = WearButtonDefaults.buttonColors(
+                            backgroundColor = WearMaterialTheme.colors.error,
+                            contentColor = WearMaterialTheme.colors.onError
+                        ),
+                        // REMOVE the modifier parameter from here:
+                        // modifier = Modifier.padding(bottom = 8.dp) // <<< DELETE THIS LINE
+                    ) {
+                        Text("Delete")
+                    }
+                }
+            }
+
         }
+
 
         // +Cue chip (Update text)
         Box(Modifier.fillMaxSize(), Alignment.BottomCenter) {
@@ -386,6 +451,35 @@ fun EditTimerScreen(
             }
         )
     } // End of if(showDialog)
+    if (showDeleteConfirmDialog) {
+        AlertDialog( // Use androidx.compose.material3.AlertDialog
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { M3Text("Delete Preset?") }, // Use M3 Text
+            text = { M3Text("Are you sure you want to delete '${label.ifBlank { "this timer" }}'?") }, // M3 Text
+            confirmButton = {
+                TextButton( // Use M3 TextButton
+                    onClick = {
+                        if (presetId != null) { // Safety check
+                            Log.d("EditTimerScreen", "Confirming delete for ID: $presetId") // Add log
+                            vm.delete(presetId) // Call your ViewModel's delete function
+                            showDeleteConfirmDialog = false
+                            onDone() // Navigate back
+                        } else {
+                            Log.w("EditTimerScreen", "Delete confirmation clicked but presetId was null") // Add warning log
+                        }
+                    }
+                ) {
+                    // Use M3 Text, styled with M3 Theme's error color
+                    M3Text("Delete", color = M3MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) { // M3 TextButton
+                    M3Text("Cancel") // M3 Text
+                }
+            }
+        )
+    }
 }
 
 // --- Remember to have these defined elsewhere in your project ---
