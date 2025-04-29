@@ -157,12 +157,10 @@ fun EditTimerScreen(
 
     val presets by vm.presets.collectAsState()
 
-    // ───── 1. Чтение существующего пресета (если есть) ─────
     val initialPreset = remember(presetId, presets) {
         presets.firstOrNull { it.id == presetId }
     }
 
-    // ───── 2. Состояния с корректной инициализацией ─────
     var hours by rememberSaveable(presetId) {
         mutableIntStateOf(
             ((initialPreset?.durationMillis ?: 0L) / 3_600_000L).toInt()
@@ -185,15 +183,11 @@ fun EditTimerScreen(
         )
     }
 
-    // ───── 3. UI-стейты управления ─────
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var addingCue             by remember { mutableStateOf(false) }
 
-    // ───── 4. Больше не нужен LaunchedEffect для загрузки данных ─────
 
-    // ───── 5. Определение экрана ─────
     if (addingCue) {
-        // *** SHOW AddCueScreen (без изменений) ***
         val totalDurationMinutes = remember(hours, minutes) { hours * 60 + minutes }
         AddCueScreen(
             totalDurationMinutes = totalDurationMinutes,
@@ -536,7 +530,7 @@ fun EditTimerScreen(
 @Composable
 fun AddCueScreen(
     totalDurationMinutes: Int,
-    existingCues: List<NotificationCue>,    // ← добавили параметр
+    existingCues: List<NotificationCue>,
     onAddCue: (NotificationCue) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -572,13 +566,11 @@ fun AddCueScreen(
         repeats = repeatOptions[repeatsPickerState.selectedOption]
     }
 
-    // --- NEW: Собираем уже занятые «минуты до конца» ---
     val usedOffsetsMinutes = remember(existingCues, totalDurationMinutes) {
         existingCues.map { cue ->
             ((totalDurationMinutes * 60_000L - cue.offsetMillis) / 60_000L).toInt()
         }.toSet()
     }
-    // Флаг дублирования
     val isDuplicate = offset in usedOffsetsMinutes
 
     // --- UI ---
