@@ -1,4 +1,5 @@
 package com.example.timerapp.presentation
+import android.util.Log
 
 import android.app.Application
 import android.media.Ringtone
@@ -127,55 +128,62 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
             // Get system services safely
             val vibrator = getApplication<Application>().getSystemService(Vibrator::class.java)
             val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            var ringtone: Ringtone? = null // Use nullable Ringtone
-            withContext(Dispatchers.Main) { // Get ringtone on Main thread
-                if (ringtoneUri != null) {
-                    ringtone = RingtoneManager.getRingtone(getApplication(), ringtoneUri)
-                }
+            var ringtone: Ringtone? = null
+            withContext(Dispatchers.Main) {
+                ringtone = RingtoneManager.getRingtone(getApplication(), ringtoneUri)
             }
 
-            try {
-                while (isActive) { // Use coroutine scope's isActive
-                    delay(1000) // Delay 1 second
+            // Track which cue offsets we've already fired
+            val firedOffsets = mutableSetOf<Long>()
 
-                    val state = _active.value // Get current state safely
-                    if (state == null || !state.isRunning) {
-                        // If state becomes null or paused externally, stop the ticker
-                        ticker?.cancel() // Cancel self
-                        break
+            try {
+                while (isActive) {
+                    delay(1000)
+                    val state = _active.value ?: break
+
+                    // Calculate the “from start” times before and after this tick
+                    val prevFromStart = state.preset.durationMillis - state.millisRemaining
+                    val nextMillis = state.millisRemaining - 1000
+                    val currFromStart = state.preset.durationMillis - nextMillis
+
+                    // Debug log: show window and all cue offsets
+                    Log.d("TimerViewModel", "Window: $prevFromStart → $currFromStart   cues=${state.preset.cues.map { it.offsetMillis }}   fired=$firedOffsets")
+
+                    // Fire any cues whose offset falls in this window
+                    state.preset.cues.forEach { cue ->
+                        if (cue.offsetMillis !in firedOffsets
+                            && prevFromStart < cue.offsetMillis
+                            && currFromStart >= cue.offsetMillis
+                        ) {
+                            Log.d("TimerViewModel", "Triggering cue at ${cue.offsetMillis}ms")
+                            firedOffsets += cue.offsetMillis
+                            withContext(Dispatchers.Main) {
+                                triggerCue(cue.type, cue.repeats, vibrator, ringtone)
+                            }
+                        }
                     }
 
-                    val nextMillis = state.millisRemaining - 1000
-
+                    // Update remaining time (and handle completion)
                     if (nextMillis <= 0) {
-                        // Timer finished
-                        withContext(Dispatchers.Main) { // Trigger final cue on Main thread
-                            triggerCue(CueType.BOTH, 3, vibrator, ringtone) // Final alert
+                        withContext(Dispatchers.Main) {
+                            triggerCue(CueType.BOTH, 3, vibrator, ringtone)
                         }
-                        _active.value = state.copy(millisRemaining = 0, isRunning = false) // Update state to finished
-                        ticker?.cancel() // Cancel self
+                        _active.value = state.copy(millisRemaining = 0, isRunning = false)
+                        ticker?.cancel()
                         break
                     } else {
-                        // Check for cues at the *start* time corresponding to nextMillis
-                        val currentTimeFromStart = state.preset.durationMillis - nextMillis
-                        state.preset.cues
-                            .filter { it.offsetMillis == currentTimeFromStart } // Compare offset from start
-                            .forEach { cue ->
-                                withContext(Dispatchers.Main) { // Trigger cue on Main thread
-                                    triggerCue(cue.type, cue.repeats, vibrator, ringtone)
-                                }
-                            }
-                        _active.value = state.copy(millisRemaining = nextMillis) // Update remaining time
+                        _active.value = state.copy(millisRemaining = nextMillis)
                     }
                 }
             } finally {
-                // Ensure ringtone is stopped if ticker loop exits unexpectedly
+                // Stop any ringing if we exit unexpectedly
                 withContext(Dispatchers.Main) {
                     ringtone?.stop()
                 }
             }
         }
     }
+
 
     // Make triggerCue non-suspending, called from Main context
     private fun triggerCue(
@@ -208,7 +216,7 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 } catch (e: Exception) {
-                    println("Error triggering cue: ${e.message}") // Log errors
+                    Log.e("TimerViewModel", "Error triggering cue", e)
                 }
                 delay(400) // Gap between repetitions
             }
