@@ -1,28 +1,32 @@
 package com.example.timerapp.presentation
-import android.util.Log
 
 import android.app.Application
+import android.content.Context
+import android.content.SharedPreferences
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.actor
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update // Use update for cleaner state changes
-import kotlinx.serialization.Serializable // Needed for data classes
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.File // For file-based storage example
-import android.content.Context
-import android.os.SystemClock
-import android.content.SharedPreferences
-
-// ---------------------------------------------------------------------------
+import java.io.File
 
 class TimerViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -30,10 +34,11 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
         app.getSharedPreferences("active_timer", Context.MODE_PRIVATE)
 
     private companion object {
-        const val KEY_END_TIME  = "end_time"
+        const val KEY_END_TIME = "end_time"
         const val KEY_ACTIVE_ID = "active_id"
     }
-    /* ---------- Preset Storage (Using internal file for slightly better robustness) ---------- */
+
+    /* ---------- Preset Storage ---------- */
     private val storageFile = File(app.filesDir, "timer_presets.json")
 
     private val _presets = MutableStateFlow<List<TimerPreset>>(emptyList())
@@ -47,18 +52,13 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
         try {
             if (storageFile.exists()) {
                 val jsonString = storageFile.readText()
-                if (jsonString.isNotBlank()) {
-                    _presets.value = Json.decodeFromString<List<TimerPreset>>(jsonString)
-                        .sortedBy { it.label.lowercase() } // Keep presets sorted alphabetically
-                } else {
-                    _presets.value = emptyList()
-                }
-            } else {
-                _presets.value = emptyList()
+                _presets.value = if (jsonString.isNotBlank()) {
+                    Json.decodeFromString<List<TimerPreset>>(jsonString)
+                        .sortedBy { it.label.lowercase() }
+                } else emptyList()
             }
         } catch (e: Exception) {
-            // Handle error (e.g., log, default to empty list)
-            println("Error loading presets: ${e.message}")
+            Log.e("TimerViewModel", "Error loading presets", e)
             _presets.value = emptyList()
         }
     }
@@ -67,16 +67,14 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
         try {
             storageFile.writeText(Json.encodeToString(_presets.value))
         } catch (e: Exception) {
-            // Handle error (e.g., log)
-            println("Error persisting presets: ${e.message}")
+            Log.e("TimerViewModel", "Error persisting presets", e)
         }
     }
 
     fun addOrUpdate(p: TimerPreset) {
-        // Use update for atomic operation (though maybe overkill here)
         _presets.update { currentList ->
             (currentList.filterNot { it.id == p.id } + p)
-                .sortedBy { it.label.lowercase() } // Maintain sort order
+                .sortedBy { it.label.lowercase() }
         }
         persist()
     }
@@ -84,14 +82,11 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
     fun delete(id: Long) {
         _presets.update { currentList ->
             currentList.filterNot { it.id == id }
-            // No need to re-sort after deletion
         }
         persist()
     }
 
     /* ---------- Active Timer ---------- */
-
-    // Renamed to avoid conflict if ActiveTimerState exists elsewhere
     data class ActiveTimerInternalState(
         val preset: TimerPreset,
         val millisRemaining: Long,
@@ -103,50 +98,96 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
 
     private var ticker: Job? = null
 
+    /* ---------- Cue Executor Actor ---------- */
+    private val cueActor = viewModelScope.actor<NotificationCue>(capacity = Channel.UNLIMITED) {
+        // Prepare system services once
+        val application = getApplication<Application>()
+        val vibrator = application.getSystemService(Vibrator::class.java)
+        val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val ringtone: Ringtone? = withContext(Dispatchers.Main) {
+            RingtoneManager.getRingtone(application, ringtoneUri)
+        }
+
+        for (cue in channel) {
+            executeCue(cue, vibrator, ringtone)
+        }
+    }
+
+    private suspend fun executeCue(
+        cue: NotificationCue,
+        vibrator: Vibrator?,
+        ringtone: Ringtone?
+    ) = withContext(Dispatchers.Main) {
+        repeat(cue.repeats.coerceIn(1, 10)) {
+            try {
+                when (cue.type) {
+                    CueType.SOUND -> {
+                        ringtone?.stop()
+                        ringtone?.play()
+                    }
+                    CueType.VIBRATION -> {
+                        vibrator?.vibrate(
+                            VibrationEffect.createOneShot(
+                                300,
+                                VibrationEffect.DEFAULT_AMPLITUDE
+                            )
+                        )
+                    }
+                    CueType.BOTH -> {
+                        ringtone?.stop()
+                        ringtone?.play()
+                        vibrator?.vibrate(
+                            VibrationEffect.createOneShot(
+                                300,
+                                VibrationEffect.DEFAULT_AMPLITUDE
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("TimerViewModel", "Error executing cue", e)
+            }
+            delay(400)
+        }
+    }
+
     fun startTimer(id: Long) {
         val preset = _presets.value.firstOrNull { it.id == id } ?: return
-
         val endTime = SystemClock.elapsedRealtime() + preset.durationMillis
         prefs.edit()
-            .putLong(KEY_END_TIME,  endTime)
+            .putLong(KEY_END_TIME, endTime)
             .putLong(KEY_ACTIVE_ID, id)
             .apply()
 
-        _active.value = ActiveTimerInternalState(preset, preset.durationMillis, isRunning = true)
-        ticker?.cancel()
+        _active.value = ActiveTimerInternalState(preset, preset.durationMillis, true)
         scheduleTicker()
     }
 
     fun resumeIfNeeded() {
         val endTime = prefs.getLong(KEY_END_TIME, 0L)
-        val id      = prefs.getLong(KEY_ACTIVE_ID, -1L)
-
+        val id = prefs.getLong(KEY_ACTIVE_ID, -1L)
         if (endTime > SystemClock.elapsedRealtime() && id != -1L) {
             val preset = _presets.value.firstOrNull { it.id == id } ?: return
             val remaining = endTime - SystemClock.elapsedRealtime()
-
-            _active.value = ActiveTimerInternalState(preset, remaining, isRunning = true)
-            ticker?.cancel()
+            _active.value = ActiveTimerInternalState(preset, remaining, true)
             scheduleTicker()
         }
     }
 
     fun pauseOrResume() {
         val state = _active.value ?: return
-
         if (state.isRunning) {
-            // PAUSE
+            // Pause
             ticker?.cancel()
             prefs.edit().remove(KEY_END_TIME).apply()
             _active.value = state.copy(isRunning = false)
         } else {
-            // RESUME
+            // Resume
             val endTime = SystemClock.elapsedRealtime() + state.millisRemaining
             prefs.edit()
-                .putLong(KEY_END_TIME,  endTime)
+                .putLong(KEY_END_TIME, endTime)
                 .putLong(KEY_ACTIVE_ID, state.preset.id)
                 .apply()
-
             _active.value = state.copy(isRunning = true)
             scheduleTicker()
         }
@@ -159,95 +200,36 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun scheduleTicker() {
-        // Prevent multiple tickers if already running
-        if (ticker?.isActive == true) return
-
+        ticker?.cancel()
         ticker = viewModelScope.launch(Dispatchers.Default) {
-            // Get system services safely
-            val vibrator = getApplication<Application>().getSystemService(Vibrator::class.java)
-            val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            var ringtone: Ringtone? = null
-            withContext(Dispatchers.Main) {
-                ringtone = RingtoneManager.getRingtone(getApplication(), ringtoneUri)
-            }
-
-            // Track which cue offsets we've already fired
             val firedOffsets = mutableSetOf<Long>()
+            while (isActive) {
+                val endTime = prefs.getLong(KEY_END_TIME, 0L)
+                val now = SystemClock.elapsedRealtime()
+                val remaining = endTime - now
+                val state = _active.value ?: break
+                val elapsedFromStart = state.preset.durationMillis - remaining
+                val prevElapsed = state.preset.durationMillis - state.millisRemaining
 
-            try {
-                while (isActive) {
-                    val endTime = prefs.getLong(KEY_END_TIME, 0L)
-                    val now     = SystemClock.elapsedRealtime()
-                    val remaining = endTime - now
+                state.preset.cues.forEach { cue ->
+                    if (cue.offsetMillis !in firedOffsets &&
+                        prevElapsed < cue.offsetMillis &&
+                        elapsedFromStart >= cue.offsetMillis) {
 
-                    val state = _active.value ?: break
-                    val elapsedFromStart = state.preset.durationMillis - remaining
-                    val prevElapsed      = state.preset.durationMillis - state.millisRemaining
-
-                    // fire cues that fall between prevElapsed and elapsedFromStart (unchanged logic)
-                    state.preset.cues.forEach { cue ->
-                        if (cue.offsetMillis !in firedOffsets &&
-                            prevElapsed < cue.offsetMillis &&
-                            elapsedFromStart >= cue.offsetMillis) {
-
-                            firedOffsets += cue.offsetMillis
-                            withContext(Dispatchers.Main) { triggerCue(cue.type, cue.repeats, vibrator, ringtone) }
-                        }
+                        firedOffsets += cue.offsetMillis
+                        cueActor.trySend(cue)
                     }
-
-                    if (remaining <= 0) {
-                        withContext(Dispatchers.Main) { triggerCue(CueType.BOTH, 3, vibrator, ringtone) }
-                        _active.value = state.copy(millisRemaining = 0, isRunning = false)
-                        prefs.edit().clear().apply()
-                        break
-                    } else {
-                        _active.value = state.copy(millisRemaining = remaining)
-                    }
-                    delay(1000)
-                }            } finally {
-                // Stop any ringing if we exit unexpectedly
-                withContext(Dispatchers.Main) {
-                    ringtone?.stop()
                 }
-            }
-        }
-    }
 
-
-    // Make triggerCue non-suspending, called from Main context
-    private fun triggerCue(
-        type: CueType,
-        repeats: Int,
-        vibrator: Vibrator?,
-        ringtone: Ringtone?
-    ) {
-        viewModelScope.launch {
-            repeat(repeats.coerceIn(1, 10)) {
-                try {
-                    when (type) {
-                        CueType.SOUND -> {
-                            // ⚡ Stop any in-flight playback before starting again
-                            ringtone?.stop()
-                            ringtone?.play()
-                        }
-                        CueType.VIBRATION ->
-                            vibrator?.vibrate(
-                                VibrationEffect.createOneShot(300, VibrationEffect.DEFAULT_AMPLITUDE)
-                            )
-                        CueType.BOTH -> {
-                            ringtone?.stop()
-                            ringtone?.play()
-                            vibrator?.vibrate(
-                                VibrationEffect.createOneShot(300, VibrationEffect.DEFAULT_AMPLITUDE)
-                            )
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("TimerViewModel", "Error triggering cue", e)
+                if (remaining <= 0) {
+                    cueActor.trySend(NotificationCue(0L, CueType.BOTH, repeats = 3))
+                    _active.value = state.copy(millisRemaining = 0L, isRunning = false)
+                    prefs.edit().clear().apply()
+                    break
+                } else {
+                    _active.value = state.copy(millisRemaining = remaining)
                 }
-                // you can shorten this gap if you like,
-                // but be sure your tone actually stops first!
-                delay(400)
+                delay(1000)
             }
         }
     }
