@@ -9,22 +9,29 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.wear.compose.foundation.ExperimentalWearFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.material.icons.Icons // <-- IMPORT ADDED
-import androidx.compose.material.icons.filled.Add // <-- IMPORT ADDED
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+
+import androidx.compose.material3.Button as M3Button
+
+
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api // <-- IMPORT ADDED
-import androidx.compose.material3.MaterialTheme // Make sure this is androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SegmentedButton // <-- IMPORT ADDED
-import androidx.compose.material3.SegmentedButtonDefaults // <-- IMPORT ADDED
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow // <-- IMPORT ADDED
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
-import androidx.compose.material3.Text as M3Text // Keep alias for clarity
+import androidx.compose.material3.Text as M3Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.clip // <<< ADD THIS LINE
-import androidx.compose.foundation.shape.CircleShape // <<< ADD THIS LINE
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 import androidx.wear.compose.material.ButtonDefaults
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -36,6 +43,7 @@ import androidx.wear.compose.material.* // Imports Wear Text, Card, Chip, Icon, 
 import androidx.compose.material3.MaterialTheme as M3MaterialTheme
 import androidx.wear.compose.material.ButtonDefaults as WearButtonDefaults // Alias Wear Button Defaults
 import androidx.wear.compose.material.MaterialTheme as WearMaterialTheme // Alias Wear Theme
+import androidx.compose.material3.Card as M3Card
 
 /* ---------- HomeScreen ---------- */
 @OptIn(ExperimentalFoundationApi::class) // <<< Essential for combinedClickable
@@ -142,424 +150,589 @@ fun HomeScreen(
 }
 
 /* ---------- EditTimerScreen ---------- */
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+// Add ExperimentalWearFoundationApi if not present
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class, ExperimentalWearFoundationApi::class)
 @Composable
 fun EditTimerScreen(
     vm: TimerViewModel,
     presetId: Long?,
     onDone: () -> Unit
 ) {
-    Log.d("EditTimerScreen", "Received presetId: $presetId")
-    // State for hours and minutes separately
+    Log.d("EditTimerScreen", "Composable Start. PresetId: $presetId")
+
+    // --- State for Timer Properties ---
     var hours by remember { mutableIntStateOf(0) }
     var minutes by remember { mutableIntStateOf(1) } // Default to 1 min if new
     var label by remember { mutableStateOf("") }
     var cues by remember { mutableStateOf(listOf<NotificationCue>()) }
-    var showDialog by remember { mutableStateOf(false) }
-    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
-    // Load existing preset data
+    // --- State for UI Control ---
+    // var showDialog by remember { mutableStateOf(false) } // <<< REMOVE old dialog state
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var addingCue by remember { mutableStateOf(false) } // <<< ADD state for showing AddCueScreen
+
+    // --- Load existing preset data ---
     LaunchedEffect(presetId) {
-        // Only load if presetId is not null (i.e., we are editing)
+        Log.d("EditTimerScreen", "LaunchedEffect triggered. PresetId: $presetId")
         if (presetId != null) {
             vm.presets.value.firstOrNull { it.id == presetId }?.let { p ->
+                Log.d("EditTimerScreen", "Loading preset: ${p.label}, Duration: ${p.durationMillis}ms")
                 label = p.label
-                val totalMinutes = p.durationMillis / 60000L
-                hours = (totalMinutes / 60).toInt()
-                minutes = (totalMinutes % 60).toInt()
-                cues = p.cues
-            }
+                val totalMinutesLoaded = p.durationMillis / 60000L
+                hours = (totalMinutesLoaded / 60).toInt()
+                minutes = (totalMinutesLoaded % 60).toInt()
+                // Ensure cues are sorted when loaded (important for consistent display/logic)
+                cues = p.cues.sortedBy { it.offsetMillis }
+                Log.d("EditTimerScreen", "Loaded State: hours=$hours, minutes=$minutes, label='$label', cues=${cues.size}")
+            } ?: Log.w("EditTimerScreen", "Preset ID $presetId not found in ViewModel")
         } else {
-            // Optionally reset fields if creating new after editing
+            Log.d("EditTimerScreen", "presetId is null, resetting fields for new timer.")
+            // Reset fields for creating a new timer
             hours = 0
-            minutes = 1
+            minutes = 1 // Default to 1 min for new
             label = ""
             cues = emptyList()
         }
     }
 
-    val listState = rememberScalingLazyListState()
-    // Options for the pickers
-    val hourOptions = remember { (0..23).toList() }
-    val minuteOptions = remember { (0..59).toList() }
-
-    Scaffold(
-        timeText = { TimeText() },
-        vignette = { Vignette(VignettePosition.TopAndBottom) },
-        positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
-    ) {
-        ScalingLazyColumn(
-            state = listState,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(top = 28.dp, bottom = 20.dp) // Increased bottom padding for Chip
-        ) {
-            // Label field (remains the same)
-            item {
-                TextField(
-                    value = label,
-                    onValueChange = { label = it },
-                    placeholder = { M3Text("Label") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .padding(bottom = 12.dp)
-                )
+    // --- Determine Content Based on State ---
+    if (addingCue) {
+        // *** SHOW ADD CUE SCREEN ***
+        Log.d("EditTimerScreen", "Displaying AddCueScreen")
+        val totalDurationMinutes = remember(hours, minutes) { hours * 60 + minutes }
+        AddCueScreen(
+            totalDurationMinutes = totalDurationMinutes,
+            onAddCue = { newCue ->
+                Log.d("EditTimerScreen", "AddCueScreen returned new cue: $newCue")
+                // Add the new cue and sort the list by offset (time from start)
+                cues = (cues + newCue).sortedBy { it.offsetMillis }
+                addingCue = false // Switch back to the edit screen
+            },
+            onCancel = {
+                Log.d("EditTimerScreen", "AddCueScreen cancelled")
+                addingCue = false // Switch back to the edit screen
             }
+        )
 
-            // Duration Pickers (Hours and Minutes)
-            item {
-                // Wrap Duration Text and Picker Row in a Column for better structure
-                Column(
+    } else {
+        // *** SHOW EDIT TIMER SCREEN ***
+        Log.d("EditTimerScreen", "Displaying EditTimerScreen")
+        val listState = rememberScalingLazyListState()
+        val hourOptions = remember { (0..23).toList() }
+        val minuteOptions = remember { (0..59).toList() }
+
+        Scaffold(
+            timeText = { TimeText() },
+            vignette = { Vignette(VignettePosition.TopAndBottom) },
+            positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
+        ) {
+            // Use Box to allow positioning the "Add Signal" button at the bottom
+            Box(modifier = Modifier.fillMaxSize()) {
+
+                ScalingLazyColumn(
+                    modifier = Modifier.fillMaxSize(), // Fill the box
+                    state = listState,
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    // Apply the width modifier to this wrapper Column
-                    modifier = Modifier.fillMaxWidth(0.9f)
+                    // Increase bottom padding significantly to avoid overlap with the fixed Add button
+                    contentPadding = PaddingValues(top = 28.dp, bottom = 70.dp) // Needs space for button row
                 ) {
-                    // 1. Duration Text is now inside the wrapper Column
-                    Text("Duration")
-                    Spacer(Modifier.height(8.dp)) // Space between "Duration" and the pickers
+                    // --- Label field ---
+                    item {
+                        Log.d("EditTimerScreen", "Composing Label TextField")
+                        TextField( // M3 TextField
+                            value = label,
+                            onValueChange = { label = it },
+                            placeholder = { M3Text("Label (Optional)") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .padding(bottom = 12.dp)
+                        )
+                    }
 
-                    // The Row containing the pickers remains largely the same
+                    // --- Duration Pickers ---
+                    item {
+                        Log.d("EditTimerScreen", "Composing Duration Pickers")
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.fillMaxWidth(0.9f)
+                        ) {
+                            Text("Duration") // Wear Text
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.height(110.dp), // Fixed height for pickers
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                // Hours Picker
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Hours") // Wear Text
+                                    val hourPickerState = rememberPickerState(
+                                        initialNumberOfOptions = hourOptions.size,
+                                        // Ensure initial selection matches state
+                                        initiallySelectedOption = hourOptions.indexOf(hours).coerceAtLeast(0)
+                                    )
+                                    // Update state when picker selection changes
+                                    LaunchedEffect(hourPickerState.selectedOption) {
+                                        val newHours = hourOptions[hourPickerState.selectedOption]
+                                        if (newHours != hours) {
+                                            Log.d("EditTimerScreen", "Hour picker changed to: $newHours")
+                                            hours = newHours
+                                        }
+                                    }
+                                    // Update picker if state changes externally (e.g., on load)
+                                    LaunchedEffect(hours) {
+                                        val targetIndex = hourOptions.indexOf(hours).coerceAtLeast(0)
+                                        if (hourPickerState.selectedOption != targetIndex) {
+                                            Log.d("EditTimerScreen", "Scrolling hour picker to index: $targetIndex for hours: $hours")
+                                            hourPickerState.scrollToOption(targetIndex)
+                                        }
+                                    }
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Picker( state = hourPickerState, modifier = Modifier.fillMaxWidth()) { h -> Text("$h") } // Wear Picker & Text
+                                    }
+                                }
+
+                                Spacer(Modifier.width(16.dp))
+
+                                // Minutes Picker
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Minutes") // Wear Text
+                                    val minutePickerState = rememberPickerState(
+                                        initialNumberOfOptions = minuteOptions.size,
+                                        initiallySelectedOption = minuteOptions.indexOf(minutes).coerceAtLeast(0)
+                                    )
+                                    // Update state when picker selection changes
+                                    LaunchedEffect(minutePickerState.selectedOption) {
+                                        val newMinutes = minuteOptions[minutePickerState.selectedOption]
+                                        if (newMinutes != minutes) {
+                                            Log.d("EditTimerScreen", "Minute picker changed to: $newMinutes")
+                                            minutes = newMinutes
+                                        }
+                                    }
+                                    // Update picker if state changes externally
+                                    LaunchedEffect(minutes) {
+                                        val targetIndex = minuteOptions.indexOf(minutes).coerceAtLeast(0)
+                                        if (minutePickerState.selectedOption != targetIndex) {
+                                            Log.d("EditTimerScreen", "Scrolling minute picker to index: $targetIndex for minutes: $minutes")
+                                            minutePickerState.scrollToOption(targetIndex)
+                                        }
+                                    }
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Picker( state = minutePickerState, modifier = Modifier.fillMaxWidth()) { m -> Text("%02d".format(m)) } // Wear Picker & Text
+                                    }
+                                }
+                            } // End Row
+                        } // End wrapper Column
+                        Spacer(Modifier.height(12.dp))
+                    } // End Duration item
+
+
+                    // --- Cues list ---
+                    if (cues.isNotEmpty()) {
+                        item { M3Text("Signals", modifier = Modifier.padding(bottom = 4.dp)) } // Title for cues list
+                    }
+                    Log.d("EditTimerScreen", "Composing Cues List (${cues.size} items)")
+                    itemsIndexed(
+                        items = cues,
+                        key = { index, cueItem -> cueItem.hashCode().toLong() + index } // More robust key
+                    ) { idx, cue ->
+                        Log.d("EditTimerScreen", "Composing Cue Item $idx: $cue")
+                        // Use M3Card for consistency maybe? Or keep Wear Card? Let's try M3Card
+                        M3Card(
+                            onClick = {
+                                Log.d("EditTimerScreen", "Cue Card $idx clicked (for future edit)")
+                                // Maybe navigate to AddCueScreen with cue data to edit?
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .pointerInput(idx, cue) { // Long press delete on the Card itself
+                                    detectTapGestures(
+                                        onLongPress = { _ ->
+                                            Log.d("EditTimerScreen", "Cue Card $idx LONG PRESSED. Removing cue: $cue")
+                                            // Create a mutable copy, remove, and update state
+                                            cues = cues.toMutableList().apply { removeAt(idx) }
+                                        }
+                                    )
+                                }
+                        ) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp), // Padding inside card
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween // Space out elements
+                            ) {
+                                // Calculate display offset (minutes before end)
+                                val totalDurationMillis = (hours * 60L + minutes) * 60000L
+                                val millisFromEnd = (totalDurationMillis - cue.offsetMillis).coerceAtLeast(0)
+                                val displayOffsetMinutes = millisFromEnd / 60000L
+
+                                // Display Format: "-Xm" or "Start" or "End"
+                                val displayOffsetString = when {
+                                    // Handle cue exactly at the start (offsetMillis = 0)
+                                    cue.offsetMillis == 0L && totalDurationMillis > 0 -> "Start"
+                                    // Handle cue exactly at the end (offsetMillis = totalDurationMillis)
+                                    cue.offsetMillis == totalDurationMillis && totalDurationMillis > 0 -> "End"
+                                    // Handle typical offset from end
+                                    displayOffsetMinutes > 0 -> "-${displayOffsetMinutes}m"
+                                    // Handle cases very close to the end (less than a minute)
+                                    millisFromEnd > 0 -> "< 1m"
+                                    // Default/fallback (should ideally not happen with valid data)
+                                    else -> "End" // Or consider showing seconds "-${millisFromEnd/1000}s"
+                                }
+
+                                M3Text(displayOffsetString, style = M3MaterialTheme.typography.bodyLarge) // Make it clear
+                                M3Text(
+                                    "${cue.type.name.first()} ×${cue.repeats}", // e.g., V ×2
+                                    style = M3MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp)) // Space between cue cards
+                    } // End itemsIndexed
+
+                    // --- Spacer to push buttons down ---
+                    // Add enough space so buttons are clearly below cues, especially if list is short
+                    item { Spacer(Modifier.height(16.dp)) }
+
+                    // --- Save button ---
+                    item {
+                        Log.d("EditTimerScreen", "Composing Save Button")
+                        Button( // M3 Button
+                            onClick = {
+                                Log.d("EditTimerScreen", "Save Button Clicked")
+                                val totalMillis = (hours * 60L + minutes) * 60_000L
+                                if (totalMillis > 0) {
+                                    val finalLabel = label.ifBlank {
+                                        // Generate a more descriptive default label
+                                        val parts = mutableListOf<String>()
+                                        if (hours > 0) parts.add("${hours}h")
+                                        if (minutes > 0) parts.add("${minutes}m")
+                                        "Timer ${parts.joinToString(" ")}"
+                                    }
+                                    val presetToSave = TimerPreset(
+                                        id = presetId ?: System.currentTimeMillis(), // Use existing ID or generate new
+                                        label = finalLabel,
+                                        durationMillis = totalMillis,
+                                        cues = cues // Save the current list of cues
+                                    )
+                                    Log.d("EditTimerScreen", "Saving preset: $presetToSave")
+                                    vm.addOrUpdate(presetToSave)
+                                    onDone() // Navigate back
+                                } else {
+                                    Log.w("EditTimerScreen", "Save attempt with 0 duration.")
+                                    // Optionally show a Toast/Snackbar message to the user
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(0.9f),
+                            enabled = (hours > 0 || minutes > 0) // Can save if duration > 0
+                        ) {
+                            M3Text("Save") // M3 Text
+                        }
+                    } // End Save Button item
+
+                    // --- Delete button (Conditional) ---
+                    if (presetId != null) {
+                        item {
+                            Log.d("EditTimerScreen", "Composing Delete Button")
+                            Spacer(Modifier.height(8.dp))
+                            M3Button( // M3 Button
+                                onClick = {
+                                    Log.d("EditTimerScreen", "Delete Button Clicked")
+                                    showDeleteConfirmDialog = true
+                                },
+                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                    containerColor = M3MaterialTheme.colorScheme.errorContainer, // Use M3 error colors
+                                    contentColor = M3MaterialTheme.colorScheme.onErrorContainer
+                                ),
+                                modifier = Modifier.fillMaxWidth(0.9f)
+                            ) {
+                                M3Text("Delete") // M3 Text
+                            }
+                        } // End Delete Button item
+                    }
+
+                } // End ScalingLazyColumn
+
+                // --- "+ Add Signal" Button Row at Bottom --- (Fixed Position)
+                // This Box is aligned to the bottom of the parent Box (which fills the screen)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter) // Position at bottom
+                        .fillMaxWidth() // Take full width
+                        .height(48.dp) // Fixed height
+                        // Use Surface/background for color - M3 Surface is often better
+                        .background(M3MaterialTheme.colorScheme.primary) // Use M3 primary color
+                ) {
                     Row(
-                        // Remove width modifier from Row, it's on the parent Column now
-                        // modifier = Modifier.fillMaxWidth(0.9f) // <<< REMOVE this line
-                        modifier = Modifier.height(110.dp), // Keep height
+                        modifier = Modifier
+                            .fillMaxSize() // Fill the Box
+                            .clickable(
+                                enabled = (hours > 0 || minutes > 0), // Enable only if duration > 0
+                                onClick = {
+                                    Log.d("EditTimerScreen", "Add Signal Button Clicked")
+                                    addingCue = true // <<< Set state to show AddCueScreen
+                                }
+                            )
+                            .alpha(if (hours > 0 || minutes > 0) 1f else 0.6f) // Visual feedback for disabled state
+                            .padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        // Hours Picker Column (No structural changes inside)
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Hours")
-                            // ... (rest of Hours Picker code) ...
-                            val hourPickerState = rememberPickerState(
-                                initialNumberOfOptions = hourOptions.size,
-                                initiallySelectedOption = hourOptions.indexOf(hours).coerceAtLeast(0)
-                            )
-                            LaunchedEffect(hourPickerState.selectedOption) {
-                                hours = hourOptions[hourPickerState.selectedOption]
-                            }
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Picker( state = hourPickerState, modifier = Modifier.fillMaxWidth()) { h -> Text("$h") }
-                            }
-                        }
-
-                        Spacer(Modifier.width(16.dp))
-
-                        // Minutes Picker Column (No structural changes inside)
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Minutes")
-                            // ... (rest of Minutes Picker code) ...
-                            val minutePickerState = rememberPickerState(
-                                initialNumberOfOptions = minuteOptions.size,
-                                initiallySelectedOption = minuteOptions.indexOf(minutes).coerceAtLeast(0)
-                            )
-                            LaunchedEffect(minutePickerState.selectedOption) {
-                                minutes = minuteOptions[minutePickerState.selectedOption]
-                            }
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Picker( state = minutePickerState, modifier = Modifier.fillMaxWidth()) { m -> Text("%02d".format(m)) }
-                            }
-                        }
-                    } // End Row
-                } // End wrapper Column
-
-                Spacer(Modifier.height(12.dp)) // Space after the picker section
-            }
-
-
-            // Cues list (remains the same)
-            itemsIndexed(
-                items = cues,
-                key = { index, cueItem -> cueItem.hashCode() + index } // Ensure unique key
-            ) { idx, cue ->
-                Card(
-                    onClick = {
-                        Log.d("EditTimerScreen", "Card onClick triggered for cue index: $idx")
-                        /* future edit */
-                    },
-                    modifier = Modifier.fillMaxWidth(0.9f)
-                    // REMOVE .pointerInput from Card's modifier
-                ) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth() // Make Row fill Card
-                            .pointerInput(idx, cue) { // Keyed pointerInput on the Row
-                                detectTapGestures(
-                                    onLongPress = { _ ->
-                                        Log.d("EditTimerScreen", "ROW onLongPress triggered for cue index: $idx, cue: $cue") // Log LONG PRESS
-                                        cues = cues.toMutableList().apply { removeAt(idx) }
-                                    }
-                                    // Optional: onTap logging
-                                    // onTap = { Log.d("EditTimerScreen", "ROW onTap triggered for cue index: $idx") }
-                                )
-                            }
-                            .padding(8.dp), // Padding on Row
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Calculate offset display based on total duration
-                        val totalDurationMillis = (hours * 60L + minutes) * 60000L
-                        val displayOffsetMinutes = (totalDurationMillis - cue.offsetMillis) / 60000L
-                        Text("-$displayOffsetMinutes m", Modifier.weight(1f))
-                        Text("${cue.type} ×${cue.repeats}")
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-            }
-
-            // Save button (update duration calculation)
-            item {
-                Button(
-                    onClick = {
-                        // Calculate total duration in milliseconds from hours and minutes
-                        val totalMillis = (hours * 60L + minutes) * 60_000L
-                        // Prevent saving a 0 duration timer
-                        if (totalMillis > 0) {
-                            vm.addOrUpdate(
-                                TimerPreset(
-                                    id = presetId ?: System.currentTimeMillis(),
-                                    label = label.ifBlank { "Timer ${hours}h ${minutes}m" }, // Updated default label
-                                    durationMillis = totalMillis, // Use calculated total duration
-                                    cues = cues
-                                )
-                            )
-                            onDone()
-                        } else {
-                            // Optionally show a message that duration must be > 0
-                        }
-                    },
-                    modifier = Modifier
-                        // Keep existing padding if you like the space above
-                        .padding(top = 16.dp)
-                        // ADD this line to make the button wide
-                        .fillMaxWidth(0.9f),                     // Disable save if total duration is zero
-                    enabled = (hours > 0 || minutes > 0)
-                ) {
-                    Text("Save")
-                }
-            }
-            if (presetId != null) {
-                Log.d("EditTimerScreen", "presetId ($presetId) is not null, attempting to compose Delete Button item...")
-                item {
-                    Spacer(Modifier.height(8.dp)) // Keep space ABOVE
-                    // Use Wear Button
-                    Button(
-                        onClick = {
-                            showDeleteConfirmDialog = true
-                            Log.d("EditTimerScreen", "Delete button clicked, showing dialog")
-                        },
-                        colors = WearButtonDefaults.buttonColors(
-                            backgroundColor = WearMaterialTheme.colors.error,
-                            contentColor = WearMaterialTheme.colors.onError
-                        ),
-                        // REMOVE the modifier parameter from here:
-                        modifier = Modifier.fillMaxWidth(0.9f)
-                        // modifier = Modifier.padding(bottom = 8.dp) // <<< DELETE THIS LINE
-                    ) {
-                        Text("Delete")
-                    }
-                }
-            }
-
-        }
-
-
-        // +Cue chip (Update text)
-        Box(Modifier.fillMaxSize(), Alignment.BottomCenter) {
-            // Determine enabled state first for clarity
-            val isActionEnabled = (hours > 0 || minutes > 0)
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth() // Span the full width
-                    .height(48.dp) // Set a fixed height (adjust as needed)
-                    // Use primary color for background like the Chip did
-                    .background(WearMaterialTheme.colors.primary)
-                    // Apply click listener and enabled state
-                    .clickable(
-                        enabled = isActionEnabled,
-                        onClick = { showDialog = true }
-                    )
-                    // Adjust alpha based on enabled state for visual feedback
-                    .alpha(if (isActionEnabled) 1f else 0.6f)
-                    // Add internal padding for the content
-                    .padding(horizontal = 16.dp),
-                // Center the Icon and Text vertically within the Row's height
-                verticalAlignment = Alignment.CenterVertically,
-                // Center the content horizontally within the Row
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "New Signal", // Add description
-                    // Ensure content color contrasts with background
-                    tint = WearMaterialTheme.colors.onPrimary
-                )
-                Spacer(Modifier.width(8.dp)) // Space between Icon and Text
-                Text(
-                    text = "New Signal",
-                    // Ensure content color contrasts with background
-                    color = WearMaterialTheme.colors.onPrimary
-                )
-            }
-        }
-    }
-
-    // Cue dialog (Update offset logic based on total duration)
-    if (showDialog) {
-        var offset by remember { mutableIntStateOf(1) } // Offset in minutes before the end
-        var repeats by remember { mutableIntStateOf(1) }
-        var type by remember { mutableStateOf(CueType.VIBRATION) }
-
-        // Calculate total duration in minutes for the dialog logic
-        val totalDurationMinutes = remember(hours, minutes) { hours * 60 + minutes }
-
-        // --- DECLARE offsetOptions HERE, outside the 'text' lambda ---
-        val maxOffsetMinutes = remember(totalDurationMinutes) { maxOf(1, totalDurationMinutes - 1) }
-        val offsetOptions = remember(maxOffsetMinutes) { (1..maxOffsetMinutes).toList() }
-        // -------------------------------------------------------------
-
-        AlertDialog( // material3.AlertDialog
-            onDismissRequest = { showDialog = false },
-            title = { M3Text("New cue") }, // material3.Text
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // Offset picker (max offset depends on total duration)
-                    M3Text("When (minutes before end):") // material3.Text
-
-                    // Now just use the offsetOptions declared outside
-                    if (offsetOptions.isNotEmpty()) {
-                        val offState = rememberPickerState(
-                            initialNumberOfOptions = offsetOptions.size,
-                            initiallySelectedOption = (offset - 1).coerceIn(0, offsetOptions.size - 1)
+                        Icon( // M3 Icon
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add Signal",
+                            tint = M3MaterialTheme.colorScheme.onPrimary // M3 onPrimary color
                         )
-                        // Update offset state when picker changes
-                        // Make sure offset actually uses the value from the list index
-                        LaunchedEffect(offState.selectedOption) {
-                            offset = offsetOptions[offState.selectedOption.coerceIn(0, offsetOptions.size - 1)]
-                        }
-
-                        Box(
-                            Modifier.height(80.dp).fillMaxWidth(),
-                            Alignment.Center
-                        ) {
-                            // Warning: Picker is deprecated
-                            Picker(state = offState) { i -> Text("${offsetOptions[i]} min") } // wear.compose.material.Picker & Text
-                        }
-                    } else {
-                        M3Text("Duration too short for offset cues.")
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // Type selector (remains the same)
-                    SingleChoiceSegmentedButtonRow( // <-- CHANGED to SingleChoice...
-                        modifier = Modifier.fillMaxWidth(0.9f) // <-- Added modifier
-                    ) {
-                        // Use Enum.entries <-- CHANGED from .values()
-                        CueType.entries.forEachIndexed { index, ct ->
-                            SegmentedButton( // material3.SegmentedButton
-                                // Use 'selected' and 'onClick' <-- CHANGED parameters
-                                selected = ct == type,
-                                onClick = { type = ct },
-                                // Shape is required for SegmentedButton inside SingleChoice...Row
-                                shape = SegmentedButtonDefaults.itemShape(index = index, count = CueType.entries.size) // <-- ADDED shape
-                            ) {
-                                // This Text call should now be fine
-                                M3Text(ct.name.first().toString()) // Use M3Text for consistency in M3 component
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // Repeats picker (remains the same)
-                    M3Text("Repeats:") // material3.Text
-                    val repeatOptions = remember { (1..5).toList() } // Explicit options
-                    val repState = rememberPickerState(
-                        initialNumberOfOptions = repeatOptions.size,
-                        initiallySelectedOption = (repeats - 1).coerceIn(0, repeatOptions.size - 1)
-                    )
-                    // Update repeats state when picker changes
-                    // Make sure repeats actually uses the value from the list index
-                    LaunchedEffect(repState.selectedOption) {
-                        repeats = repeatOptions[repState.selectedOption.coerceIn(0, repeatOptions.size - 1)]
-                    }
-                    Box( Modifier.height(80.dp).fillMaxWidth(), Alignment.Center) {
-                        // Warning: Picker is deprecated
-                        Picker(state = repState) { i -> Text("${repeatOptions[i]}") } // wear.compose.material.Picker & Text
+                        Spacer(Modifier.width(8.dp))
+                        M3Text( // M3 Text
+                            text = "Add Signal",
+                            color = M3MaterialTheme.colorScheme.onPrimary // M3 onPrimary color
+                        )
                     }
                 }
+                // ------------------------------------
+
+            } // End outer Box for positioning Add button
+        } // End Scaffold
+    } // --- End of `else` block (showing EditTimerScreen) ---
+
+
+    // --- Delete Confirmation Dialog (Remains the same, outside the conditional display) ---
+    if (showDeleteConfirmDialog) {
+        Log.d("EditTimerScreen", "Displaying Delete Confirmation Dialog")
+        AlertDialog( // M3 AlertDialog
+            onDismissRequest = {
+                Log.d("EditTimerScreen", "Delete Confirmation Dismissed")
+                showDeleteConfirmDialog = false
             },
+            title = { M3Text("Delete Preset?") },
+            text = { M3Text("Are you sure you want to delete '${label.ifBlank { "this timer" }}'?") },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        // Calculate offset in milliseconds *from the start* for storage,
-                        // but based on user selection (minutes from end)
-                        val totalMillis = totalDurationMinutes * 60_000L
-                        val offsetFromEndMillis = offset * 60_000L // Use the current 'offset' state variable
-                        val actualOffsetMillis = (totalMillis - offsetFromEndMillis).coerceAtLeast(0L) // Offset from start
-
-                        // Add the cue using the calculated offset from start
-                        cues = cues + NotificationCue(offsetMillis = actualOffsetMillis, type = type, repeats = repeats)
-                        showDialog = false
-                    },
-                    // Disable adding if duration is too short for offsets
-                    // Now offsetOptions is in scope!
-                    enabled = offsetOptions.isNotEmpty()
-                ) {
-                    M3Text("Add") // material3.Text
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDialog = false }) { // material3.TextButton
-                    M3Text("Cancel") // material3.Text
-                }
-            }
-        )
-    } // End of if(showDialog)
-    if (showDeleteConfirmDialog) {
-        AlertDialog( // Use androidx.compose.material3.AlertDialog
-            onDismissRequest = { showDeleteConfirmDialog = false },
-            title = { M3Text("Delete Preset?") }, // Use M3 Text
-            text = { M3Text("Are you sure you want to delete '${label.ifBlank { "this timer" }}'?") }, // M3 Text
-            confirmButton = {
-                TextButton( // Use M3 TextButton
-                    onClick = {
                         if (presetId != null) { // Safety check
-                            Log.d("EditTimerScreen", "Confirming delete for ID: $presetId") // Add log
-                            vm.delete(presetId) // Call your ViewModel's delete function
+                            Log.d("EditTimerScreen", "Confirming delete for ID: $presetId")
+                            vm.delete(presetId)
                             showDeleteConfirmDialog = false
                             onDone() // Navigate back
                         } else {
-                            Log.w("EditTimerScreen", "Delete confirmation clicked but presetId was null") // Add warning log
+                            Log.e("EditTimerScreen", "Delete confirmation clicked but presetId was null!")
+                            showDeleteConfirmDialog = false // Dismiss even on error
                         }
                     }
                 ) {
-                    // Use M3 Text, styled with M3 Theme's error color
-                    M3Text("Delete", color = M3MaterialTheme.colorScheme.error)
+                    M3Text("Delete", color = M3MaterialTheme.colorScheme.error) // Use M3 error color
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirmDialog = false }) { // M3 TextButton
-                    M3Text("Cancel") // M3 Text
+                TextButton(onClick = {
+                    Log.d("EditTimerScreen", "Delete Confirmation Cancelled")
+                    showDeleteConfirmDialog = false
+                }) {
+                    M3Text("Cancel")
                 }
             }
         )
     }
 }
 
-// --- Remember to have these defined elsewhere in your project ---
-// data class TimerPreset(val id: Long, val label: String, val durationMillis: Long, val cues: List<NotificationCue>)
-// @Serializable // Add if not already present
-// data class NotificationCue(val offsetMillis: Long, val type: CueType, val repeats: Int)
-// @Serializable // Add if not already present
-// enum class CueType { VIBRATION, SOUND, BOTH } // Assuming BOTH might be needed based on ViewModel
-// interface TimerViewModel { ... }
+/* ---------- AddCueScreen ---------- */
+@OptIn(ExperimentalWearFoundationApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun AddCueScreen(
+    totalDurationMinutes: Int,             // INPUT: Total timer duration in minutes
+    onAddCue: (NotificationCue) -> Unit, // OUTPUT: Callback function when "Add" is clicked
+    onCancel: () -> Unit                   // OUTPUT: Callback function when "Cancel" is clicked
+) {
+    // --- State Variables ---
+    var offset by remember { mutableIntStateOf(1) } // Offset in minutes before the end
+    var repeats by remember { mutableIntStateOf(1) }
+    var type by remember { mutableStateOf(CueType.VIBRATION) } // Default type
+    val scrollState = rememberScrollState()
+
+    // --- Calculate Valid Offset Options ---
+    // Offset means "minutes BEFORE the end". Minimum is 1 min before end.
+    // Valid only if the total duration is > 1 minute.
+    val offsetOptions = remember(totalDurationMinutes) {
+        if (totalDurationMinutes > 1) {
+            (1 until totalDurationMinutes).toList() // e.g., duration 5 -> options [1, 2, 3, 4]
+        } else {
+            emptyList() // No offset possible if duration is 1 min or less
+        }
+    }
+    val isOffsetPossible = offsetOptions.isNotEmpty()
+
+    // --- Picker States ---
+    val offsetPickerState = rememberPickerState(
+        initialNumberOfOptions = offsetOptions.size,
+        // Set initial selection correctly, guarding against empty list
+        initiallySelectedOption = if (isOffsetPossible) {
+            // Ensure default 'offset' (1) exists in options, otherwise select first available
+            offsetOptions.indexOf(offset).coerceIn(0, offsetOptions.lastIndex)
+        } else 0 // Default to 0 if list is empty
+    )
+    val repeatOptions = remember { (1..5).toList() } // Options 1 to 5 repeats
+    val repeatsPickerState = rememberPickerState(
+        initialNumberOfOptions = repeatOptions.size,
+        initiallySelectedOption = (repeats - 1).coerceIn(0, repeatOptions.lastIndex)
+    )
+
+    // --- Update State from Pickers ---
+    LaunchedEffect(offsetPickerState.selectedOption) {
+        if (isOffsetPossible) {
+            // Update offset state only if options are available and selection is valid
+            val selectedIndex = offsetPickerState.selectedOption.coerceIn(0, offsetOptions.lastIndex)
+            offset = offsetOptions[selectedIndex]
+        }
+    }
+    LaunchedEffect(repeatsPickerState.selectedOption) {
+        val selectedIndex = repeatsPickerState.selectedOption.coerceIn(0, repeatOptions.lastIndex)
+        repeats = repeatOptions[selectedIndex]
+    }
+
+    // --- Adjust initial offset state if necessary ---
+    // This ensures 'offset' is valid if totalDurationMinutes changes while screen is composed
+    // (though less likely in this separate screen scenario, good practice)
+    LaunchedEffect(offsetOptions) {
+        if (isOffsetPossible) {
+            if (offset !in offsetOptions) {
+                offset = offsetOptions.first() // Default to first valid option
+            }
+            // Update picker scroll position if the underlying state doesn't match
+            val targetIndex = offsetOptions.indexOf(offset)
+            if(targetIndex >= 0 && offsetPickerState.selectedOption != targetIndex) {
+                offsetPickerState.scrollToOption(targetIndex)
+            }
+        } else {
+            // If no offset is possible, maybe reset offset state? (Optional)
+            offset = 1 // Reset to default, although it won't be used if disabled
+        }
+    }
+
+
+    // --- UI ---
+    Scaffold(
+        timeText = { TimeText() }
+        // Add vignette or positionIndicator if you like
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState) // Make the whole column scrollable
+                .padding(start = 16.dp, end = 16.dp, top = 28.dp, bottom = 20.dp), // Screen padding
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp) // Add space between elements
+        ) {
+            // Title
+            M3Text("New Signal", style = M3MaterialTheme.typography.titleMedium)
+
+            Spacer(Modifier.height(8.dp)) // Extra space after title
+
+            // --- Offset Picker ---
+            M3Text("Signal time (minutes before end):")
+            if (isOffsetPossible) {
+                Box(
+                    Modifier
+                        .height(80.dp) // Fixed height for picker
+                        .fillMaxWidth(0.8f), // Limit width slightly
+                    Alignment.Center
+                ) {
+                    Picker( // Wear Picker
+                        state = offsetPickerState,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { optionIndex ->
+                        // Display text like "X min"
+                        Text("${offsetOptions[optionIndex]} min") // Wear Text
+                    }
+                }
+            } else {
+                // Show message if timer is too short
+                M3Text(
+                    "Timer duration too short for offsets.",
+                    modifier = Modifier.padding(vertical = 24.dp), // Give it space like a picker
+                    style = M3MaterialTheme.typography.bodySmall // Smaller text
+                )
+            }
+
+            // --- Type Selector ---
+            M3Text("Signal Type:")
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier.fillMaxWidth(0.9f).height(40.dp) // Constrain height
+            ) {
+                CueType.entries.forEachIndexed { index, cueType ->
+                    SegmentedButton( // M3 Segmented Button
+                        selected = cueType == type,
+                        onClick = { type = cueType },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = CueType.entries.size),
+                        icon = { /* Icon is required but can be empty */ },
+                        label = { M3Text(cueType.name.first().toString()) } // Show first letter
+                    )
+                }
+            }
+
+            // --- Repeats Picker ---
+            M3Text("Repeats:")
+            Box(
+                Modifier
+                    .height(80.dp) // Fixed height for picker
+                    .fillMaxWidth(0.8f), // Limit width slightly
+                Alignment.Center
+            ) {
+                Picker( // Wear Picker
+                    state = repeatsPickerState,
+                    modifier = Modifier.fillMaxWidth()
+                ) { optionIndex ->
+                    Text("${repeatOptions[optionIndex]}") // Wear Text
+                }
+            }
+
+            Spacer(Modifier.height(12.dp)) // Space before buttons
+
+            // --- Action Buttons ---
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly // Evenly space buttons
+            ) {
+                // Cancel Button (M3)
+                Button(onClick = onCancel) {
+                    M3Text("Cancel")
+                }
+
+                // Add Button (M3)
+                Button(
+                    onClick = {
+                        // Calculate offset in milliseconds *from the start*
+                        val totalMillis = totalDurationMinutes * 60_000L
+                        // Use the current 'offset' state variable which was updated by the picker
+                        val offsetFromEndMillis = offset * 60_000L
+                        val actualOffsetMillis = (totalMillis - offsetFromEndMillis).coerceAtLeast(0L)
+
+                        // Create the cue object
+                        val newCue = NotificationCue(
+                            offsetMillis = actualOffsetMillis,
+                            type = type,
+                            repeats = repeats
+                        )
+                        onAddCue(newCue) // Pass the created cue back via the callback
+                    },
+                    // Disable adding only if duration is too short for *any* offset
+                    enabled = isOffsetPossible
+                ) {
+                    M3Text("Add")
+                }
+            }
+        } // End Column
+    } // End Scaffold
+}
+
 /* ---------- ActiveTimerScreen ---------- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -662,7 +835,6 @@ fun ActiveTimerScreen(
                         color = cancelContentColor // Use the determined content color
                     )
                 }
-                // --- ^^^ End of Cancel Box ^^^ ---
             }
         }
     }
