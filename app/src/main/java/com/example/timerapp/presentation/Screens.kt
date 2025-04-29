@@ -15,6 +15,10 @@ import androidx.wear.compose.foundation.ExperimentalWearFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.collectAsState
 
 import androidx.compose.material3.Button as M3Button
 import androidx.wear.compose.material.Text
@@ -160,60 +164,54 @@ fun EditTimerScreen(
 ) {
     Log.d("EditTimerScreen", "Composable Start. PresetId: $presetId")
 
-    // --- State for Timer Properties ---
-    var hours by remember { mutableIntStateOf(0) }
-    var minutes by remember { mutableIntStateOf(1) } // Default to 1 min if new
-    var label by remember { mutableStateOf("") }
-    var cues by remember { mutableStateOf(listOf<NotificationCue>()) }
+    val presets by vm.presets.collectAsState()
 
-    // --- State for UI Control ---
-    // var showDialog by remember { mutableStateOf(false) } // <<< REMOVE old dialog state
-    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
-    var addingCue by remember { mutableStateOf(false) } // <<< ADD state for showing AddCueScreen
-
-    // --- Load existing preset data ---
-    LaunchedEffect(presetId) {
-        Log.d("EditTimerScreen", "LaunchedEffect triggered. PresetId: $presetId")
-        if (presetId != null) {
-            vm.presets.value.firstOrNull { it.id == presetId }?.let { p ->
-                Log.d("EditTimerScreen", "Loading preset: ${p.label}, Duration: ${p.durationMillis}ms")
-                label = p.label
-                val totalMinutesLoaded = p.durationMillis / 60000L
-                hours = (totalMinutesLoaded / 60).toInt()
-                minutes = (totalMinutesLoaded % 60).toInt()
-                // Ensure cues are sorted when loaded (important for consistent display/logic)
-                cues = p.cues.sortedBy { it.offsetMillis }
-                Log.d("EditTimerScreen", "Loaded State: hours=$hours, minutes=$minutes, label='$label', cues=${cues.size}")
-            } ?: Log.w("EditTimerScreen", "Preset ID $presetId not found in ViewModel")
-        } else {
-            Log.d("EditTimerScreen", "presetId is null, resetting fields for new timer.")
-            // Reset fields for creating a new timer
-            hours = 0
-            minutes = 1 // Default to 1 min for new
-            label = ""
-            cues = emptyList()
-        }
+    // ───── 1. Чтение существующего пресета (если есть) ─────
+    val initialPreset = remember(presetId, presets) {
+        presets.firstOrNull { it.id == presetId }
     }
 
-    // --- Determine Content Based on State ---
+    // ───── 2. Состояния с корректной инициализацией ─────
+    var hours by rememberSaveable(presetId) {
+        mutableIntStateOf(
+            ((initialPreset?.durationMillis ?: 0L) / 3_600_000L).toInt()
+        )
+    }
+    var minutes by rememberSaveable(presetId) {
+        mutableIntStateOf(
+            ((initialPreset?.durationMillis ?: 60_000L) / 60_000L % 60).toInt()
+                .coerceAtLeast(1)
+        )
+    }
+    var label by rememberSaveable(presetId) {
+        mutableStateOf(initialPreset?.label ?: "")
+    }
+    var cues by rememberSaveable(presetId) {
+        mutableStateOf(
+            initialPreset?.cues
+                ?.sortedBy { it.offsetMillis }
+                ?: emptyList()
+        )
+    }
+
+    // ───── 3. UI-стейты управления ─────
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var addingCue             by remember { mutableStateOf(false) }
+
+    // ───── 4. Больше не нужен LaunchedEffect для загрузки данных ─────
+
+    // ───── 5. Определение экрана ─────
     if (addingCue) {
-        // *** SHOW ADD CUE SCREEN ***
-        Log.d("EditTimerScreen", "Displaying AddCueScreen")
+        // *** SHOW AddCueScreen (без изменений) ***
         val totalDurationMinutes = remember(hours, minutes) { hours * 60 + minutes }
         AddCueScreen(
             totalDurationMinutes = totalDurationMinutes,
             onAddCue = { newCue ->
-                Log.d("EditTimerScreen", "AddCueScreen returned new cue: $newCue")
-                // Add the new cue and sort the list by offset (time from start)
                 cues = (cues + newCue).sortedBy { it.offsetMillis }
-                addingCue = false // Switch back to the edit screen
+                addingCue = false
             },
-            onCancel = {
-                Log.d("EditTimerScreen", "AddCueScreen cancelled")
-                addingCue = false // Switch back to the edit screen
-            }
+            onCancel = { addingCue = false }
         )
-
     } else {
         // *** SHOW EDIT TIMER SCREEN ***
         Log.d("EditTimerScreen", "Displaying EditTimerScreen")
