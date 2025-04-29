@@ -475,13 +475,13 @@ fun EditTimerScreen(
                         modifier = Modifier
                             .fillMaxSize() // Fill the Box
                             .clickable(
-                                enabled = (hours > 0 || minutes > 0), // Enable only if duration > 0
+                                enabled = ((hours * 60 + minutes) > 1), // Enable only if duration > 0
                                 onClick = {
                                     Log.d("EditTimerScreen", "Add Signal Button Clicked")
                                     addingCue = true // <<< Set state to show AddCueScreen
                                 }
                             )
-                            .alpha(if (hours > 0 || minutes > 0) 1f else 0.6f) // Visual feedback for disabled state
+                            .alpha(if ((hours * 60 + minutes) > 1) 1f else 0.6f) // Visual feedback for disabled state
                             .padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
