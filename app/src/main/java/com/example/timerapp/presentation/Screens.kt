@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -112,15 +113,6 @@ fun HomeScreen(
         }
 
         Box(Modifier.fillMaxSize(), Alignment.BottomCenter) {
-            // --- CHIP DELETED ---
-            // Chip(
-            //     label = { Text("New") },
-            //     onClick = onCreate,
-            //     icon = { Icon(Icons.Default.Add, contentDescription = null) },
-            //     colors = ChipDefaults.primaryChipColors()
-            // )
-
-            // --- ROW ADDED ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth() // Span the full width
@@ -154,7 +146,6 @@ fun HomeScreen(
 }
 
 /* ---------- EditTimerScreen ---------- */
-// Add ExperimentalWearFoundationApi if not present
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class, ExperimentalWearFoundationApi::class)
 @Composable
 fun EditTimerScreen(
@@ -206,6 +197,7 @@ fun EditTimerScreen(
         val totalDurationMinutes = remember(hours, minutes) { hours * 60 + minutes }
         AddCueScreen(
             totalDurationMinutes = totalDurationMinutes,
+            existingCues = cues,
             onAddCue = { newCue ->
                 cues = (cues + newCue).sortedBy { it.offsetMillis }
                 addingCue = false
@@ -540,194 +532,160 @@ fun EditTimerScreen(
     }
 }
 
-/* ---------- AddCueScreen ---------- */
 @OptIn(ExperimentalWearFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun AddCueScreen(
-    totalDurationMinutes: Int,             // INPUT: Total timer duration in minutes
-    onAddCue: (NotificationCue) -> Unit, // OUTPUT: Callback function when "Add" is clicked
-    onCancel: () -> Unit                   // OUTPUT: Callback function when "Cancel" is clicked
+    totalDurationMinutes: Int,
+    existingCues: List<NotificationCue>,    // ← добавили параметр
+    onAddCue: (NotificationCue) -> Unit,
+    onCancel: () -> Unit
 ) {
     // --- State Variables ---
-    var offset by remember { mutableIntStateOf(1) } // Offset in minutes before the end
+    var offset by remember { mutableIntStateOf(1) }
     var repeats by remember { mutableIntStateOf(1) }
-    var type by remember { mutableStateOf(CueType.VIBRATION) } // Default type
+    var type by remember { mutableStateOf(CueType.VIBRATION) }
     val scrollState = rememberScrollState()
 
     // --- Calculate Valid Offset Options ---
-    // Offset means "minutes BEFORE the end". Minimum is 1 min before end.
-    // Valid only if the total duration is > 1 minute.
     val offsetOptions = remember(totalDurationMinutes) {
-        if (totalDurationMinutes > 1) {
-            (1 until totalDurationMinutes).toList() // e.g., duration 5 -> options [1, 2, 3, 4]
-        } else {
-            emptyList() // No offset possible if duration is 1 min or less
-        }
+        if (totalDurationMinutes > 1) (1 until totalDurationMinutes).toList()
+        else emptyList()
     }
     val isOffsetPossible = offsetOptions.isNotEmpty()
 
     // --- Picker States ---
     val offsetPickerState = rememberPickerState(
         initialNumberOfOptions = offsetOptions.size,
-        // Set initial selection correctly, guarding against empty list
-        initiallySelectedOption = if (isOffsetPossible) {
-            // Ensure default 'offset' (1) exists in options, otherwise select first available
-            offsetOptions.indexOf(offset).coerceIn(0, offsetOptions.lastIndex)
-        } else 0 // Default to 0 if list is empty
+        initiallySelectedOption = offsetOptions.indexOf(offset).coerceIn(0, offsetOptions.lastIndex)
     )
-    val repeatOptions = remember { (1..5).toList() } // Options 1 to 5 repeats
+    val repeatOptions = remember { (1..5).toList() }
     val repeatsPickerState = rememberPickerState(
         initialNumberOfOptions = repeatOptions.size,
         initiallySelectedOption = (repeats - 1).coerceIn(0, repeatOptions.lastIndex)
     )
 
-    // --- Update State from Pickers ---
+    // Sync pickers → state
     LaunchedEffect(offsetPickerState.selectedOption) {
-        if (isOffsetPossible) {
-            // Update offset state only if options are available and selection is valid
-            val selectedIndex = offsetPickerState.selectedOption.coerceIn(0, offsetOptions.lastIndex)
-            offset = offsetOptions[selectedIndex]
-        }
+        if (isOffsetPossible) offset = offsetOptions[offsetPickerState.selectedOption]
     }
     LaunchedEffect(repeatsPickerState.selectedOption) {
-        val selectedIndex = repeatsPickerState.selectedOption.coerceIn(0, repeatOptions.lastIndex)
-        repeats = repeatOptions[selectedIndex]
+        repeats = repeatOptions[repeatsPickerState.selectedOption]
     }
 
-    // --- Adjust initial offset state if necessary ---
-    // This ensures 'offset' is valid if totalDurationMinutes changes while screen is composed
-    // (though less likely in this separate screen scenario, good practice)
-    LaunchedEffect(offsetOptions) {
-        if (isOffsetPossible) {
-            if (offset !in offsetOptions) {
-                offset = offsetOptions.first() // Default to first valid option
-            }
-            // Update picker scroll position if the underlying state doesn't match
-            val targetIndex = offsetOptions.indexOf(offset)
-            if(targetIndex >= 0 && offsetPickerState.selectedOption != targetIndex) {
-                offsetPickerState.scrollToOption(targetIndex)
-            }
-        } else {
-            // If no offset is possible, maybe reset offset state? (Optional)
-            offset = 1 // Reset to default, although it won't be used if disabled
-        }
+    // --- NEW: Собираем уже занятые «минуты до конца» ---
+    val usedOffsetsMinutes = remember(existingCues, totalDurationMinutes) {
+        existingCues.map { cue ->
+            ((totalDurationMinutes * 60_000L - cue.offsetMillis) / 60_000L).toInt()
+        }.toSet()
     }
-
+    // Флаг дублирования
+    val isDuplicate = offset in usedOffsetsMinutes
 
     // --- UI ---
-    Scaffold(
-        timeText = { TimeText() }
-        // Add vignette or positionIndicator if you like
-    ) {
+    Scaffold(timeText = { TimeText() }) {
         Column(
-            modifier = Modifier
+            Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState) // Make the whole column scrollable
-                .padding(start = 16.dp, end = 16.dp, top = 28.dp, bottom = 20.dp), // Screen padding
+                .verticalScroll(scrollState)
+                .padding(horizontal = 16.dp, vertical = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp) // Add space between elements
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Title
-            M3Text("New Signal", style = M3MaterialTheme.typography.titleMedium, color = WearMaterialTheme.colors.onBackground)
+            M3Text("New Signal", style = M3MaterialTheme.typography.titleMedium)
 
-            Spacer(Modifier.height(8.dp)) // Extra space after title
-
-            // --- Offset Picker ---
-            M3Text("Signal time (minutes before end):", color = WearMaterialTheme.colors.onBackground)
+            // Offset picker
+            M3Text("Minutes before end:", color = WearMaterialTheme.colors.onBackground)
             if (isOffsetPossible) {
-                Box(
-                    Modifier
-                        .height(80.dp) // Fixed height for picker
-                        .fillMaxWidth(0.8f), // Limit width slightly
-                    Alignment.Center
-                ) {
-                    Picker( // Wear Picker
-                        state = offsetPickerState,
-                        modifier = Modifier.fillMaxWidth()
-                    ) { optionIndex ->
-                        // Display text like "X min"
-                        Text("${offsetOptions[optionIndex]} min") // Wear Text
+                Box(Modifier.height(80.dp).fillMaxWidth(0.8f), Alignment.Center) {
+                    Picker(state = offsetPickerState, modifier = Modifier.fillMaxWidth()) { idx ->
+                        Text("${offsetOptions[idx]} min")
                     }
                 }
             } else {
-                // Show message if timer is too short
                 M3Text(
-                    "Timer duration too short for offsets.",
-                    modifier = Modifier.padding(vertical = 24.dp), // Give it space like a picker
-                    style = M3MaterialTheme.typography.bodySmall, // Smaller text
-                    color = WearMaterialTheme.colors.onBackground
+                    "Duration too short",
+                    style = M3MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(vertical = 24.dp)
                 )
             }
 
-            // --- Type Selector ---
+            // Type selector
             M3Text("Signal Type:", color = WearMaterialTheme.colors.onBackground)
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier.fillMaxWidth(0.9f).height(40.dp) // Constrain height
-            ) {
-                CueType.entries.forEachIndexed { index, cueType ->
-                    SegmentedButton( // M3 Segmented Button
-                        selected = cueType == type,
-                        onClick = { type = cueType },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = CueType.entries.size),
-                        icon = { /* Icon is required but can be empty */ },
-                        label = { M3Text(cueType.name.first().toString()) } // Show first letter
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth(0.9f).height(40.dp)) {
+                CueType.entries.forEachIndexed { i, ct ->
+                    SegmentedButton(
+                        selected = ct == type,
+                        onClick = { type = ct },
+                        shape = SegmentedButtonDefaults.itemShape(i, CueType.entries.size),
+                        icon = {},
+                        label = { M3Text(ct.name.first().toString()) }
                     )
                 }
             }
 
-            // --- Repeats Picker ---
+            // Repeats picker
             M3Text("Repeats:", color = WearMaterialTheme.colors.onBackground)
-            Box(
-                Modifier
-                    .height(80.dp) // Fixed height for picker
-                    .fillMaxWidth(0.8f), // Limit width slightly
-                Alignment.Center
-            ) {
-                Picker( // Wear Picker
-                    state = repeatsPickerState,
-                    modifier = Modifier.fillMaxWidth()
-                ) { optionIndex ->
-                    Text("${repeatOptions[optionIndex]}") // Wear Text
+            Box(Modifier.height(80.dp).fillMaxWidth(0.8f), Alignment.Center) {
+                Picker(state = repeatsPickerState, modifier = Modifier.fillMaxWidth()) { idx ->
+                    Text("${repeatOptions[idx]}")
                 }
             }
 
-            Spacer(Modifier.height(12.dp)) // Space before buttons
+            Spacer(Modifier.height(12.dp))
 
-            // --- Action Buttons ---
+            // Error message for duplicate
+            if (isDuplicate) {
+                M3Text(
+                    "Cue at $offset m already exists",
+                    style = M3MaterialTheme.typography.bodySmall,
+                    color = M3MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
+
+            // Action buttons
+
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly // Evenly space buttons
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Cancel Button (M3)
-                Button(onClick = onCancel) {
-                    M3Text("Cancel")
+                // Cancel
+                M3Button(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp) // ①
+                ) {
+                    Text(
+                        text = "Cancel",
+                        style = M3MaterialTheme.typography.labelMedium,               // ②
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                        softWrap = false
+                    )
                 }
 
-                // Add Button (M3)
-                Button(
+                // Add
+                M3Button(
                     onClick = {
-                        // Calculate offset in milliseconds *from the start*
-                        val totalMillis = totalDurationMinutes * 60_000L
-                        // Use the current 'offset' state variable which was updated by the picker
-                        val offsetFromEndMillis = offset * 60_000L
-                        val actualOffsetMillis = (totalMillis - offsetFromEndMillis).coerceAtLeast(0L)
-
-                        // Create the cue object
-                        val newCue = NotificationCue(
-                            offsetMillis = actualOffsetMillis,
-                            type = type,
-                            repeats = repeats
-                        )
-                        onAddCue(newCue) // Pass the created cue back via the callback
+                        val totalMs = totalDurationMinutes * 60_000L
+                        val actualOffset = (totalMs - offset * 60_000L).coerceAtLeast(0L)
+                        onAddCue(NotificationCue(actualOffset, type, repeats))
                     },
-                    // Disable adding only if duration is too short for *any* offset
-                    enabled = isOffsetPossible
+                    enabled = isOffsetPossible && !isDuplicate,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp) // keep paddings identical
                 ) {
-                    M3Text("Add")
+                    Text(
+                        text = "Add",
+                        style = M3MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                        softWrap = false
+                    )
                 }
             }
-        } // End Column
-    } // End Scaffold
+        }
+    }
 }
 
 /* ---------- ActiveTimerScreen ---------- */
