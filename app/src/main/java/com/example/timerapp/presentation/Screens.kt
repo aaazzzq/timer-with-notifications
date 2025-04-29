@@ -17,7 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 
 import androidx.compose.material3.Button as M3Button
-
+import androidx.wear.compose.material.Text
 
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -346,21 +346,19 @@ fun EditTimerScreen(
                         Log.d("EditTimerScreen", "Composing Cue Item $idx: $cue")
                         // Use M3Card for consistency maybe? Or keep Wear Card? Let's try M3Card
                         M3Card(
-                            onClick = {
-                                Log.d("EditTimerScreen", "Cue Card $idx clicked (for future edit)")
-                                // Maybe navigate to AddCueScreen with cue data to edit?
-                            },
                             modifier = Modifier
                                 .fillMaxWidth(0.9f)
-                                .pointerInput(idx, cue) { // Long press delete on the Card itself
-                                    detectTapGestures(
-                                        onLongPress = { _ ->
-                                            Log.d("EditTimerScreen", "Cue Card $idx LONG PRESSED. Removing cue: $cue")
-                                            // Create a mutable copy, remove, and update state
-                                            cues = cues.toMutableList().apply { removeAt(idx) }
-                                        }
-                                    )
-                                }
+                                .combinedClickable( // <<< ADD combinedClickable
+                                    onClick = {
+                                        Log.d("EditTimerScreen", "Cue Card $idx clicked (for future edit)")
+                                        // TODO: Implement edit functionality if needed later
+                                    },
+                                    onLongClick = {
+                                        Log.d("EditTimerScreen", "Cue Card $idx LONG PRESSED via combinedClickable. Removing cue: $cue")
+                                        // Same state update logic
+                                        cues = cues.toMutableList().apply { removeAt(idx) }
+                                    }
+                                )
                         ) {
                             Row(
                                 Modifier
@@ -632,12 +630,12 @@ fun AddCueScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp) // Add space between elements
         ) {
             // Title
-            M3Text("New Signal", style = M3MaterialTheme.typography.titleMedium)
+            M3Text("New Signal", style = M3MaterialTheme.typography.titleMedium, color = WearMaterialTheme.colors.onBackground)
 
             Spacer(Modifier.height(8.dp)) // Extra space after title
 
             // --- Offset Picker ---
-            M3Text("Signal time (minutes before end):")
+            M3Text("Signal time (minutes before end):", color = WearMaterialTheme.colors.onBackground)
             if (isOffsetPossible) {
                 Box(
                     Modifier
@@ -658,12 +656,13 @@ fun AddCueScreen(
                 M3Text(
                     "Timer duration too short for offsets.",
                     modifier = Modifier.padding(vertical = 24.dp), // Give it space like a picker
-                    style = M3MaterialTheme.typography.bodySmall // Smaller text
+                    style = M3MaterialTheme.typography.bodySmall, // Smaller text
+                    color = WearMaterialTheme.colors.onBackground
                 )
             }
 
             // --- Type Selector ---
-            M3Text("Signal Type:")
+            M3Text("Signal Type:", color = WearMaterialTheme.colors.onBackground)
             SingleChoiceSegmentedButtonRow(
                 modifier = Modifier.fillMaxWidth(0.9f).height(40.dp) // Constrain height
             ) {
@@ -679,7 +678,7 @@ fun AddCueScreen(
             }
 
             // --- Repeats Picker ---
-            M3Text("Repeats:")
+            M3Text("Repeats:", color = WearMaterialTheme.colors.onBackground)
             Box(
                 Modifier
                     .height(80.dp) // Fixed height for picker
