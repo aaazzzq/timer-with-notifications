@@ -192,33 +192,33 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
         vibrator: Vibrator?,
         ringtone: Ringtone?
     ) {
-        // This function should now be called within withContext(Dispatchers.Main)
-        viewModelScope.launch { // Launch separate short-lived coroutine for repeats/delays
-            repeat(repeats.coerceIn(1, 5)) {
+        viewModelScope.launch {
+            repeat(repeats.coerceIn(1, 10)) {
                 try {
                     when (type) {
-                        CueType.SOUND -> ringtone?.play()
+                        CueType.SOUND -> {
+                            // ⚡ Stop any in-flight playback before starting again
+                            ringtone?.stop()
+                            ringtone?.play()
+                        }
                         CueType.VIBRATION ->
                             vibrator?.vibrate(
-                                VibrationEffect.createOneShot(
-                                    300,
-                                    VibrationEffect.DEFAULT_AMPLITUDE
-                                )
+                                VibrationEffect.createOneShot(300, VibrationEffect.DEFAULT_AMPLITUDE)
                             )
                         CueType.BOTH -> {
+                            ringtone?.stop()
                             ringtone?.play()
                             vibrator?.vibrate(
-                                VibrationEffect.createOneShot(
-                                    300,
-                                    VibrationEffect.DEFAULT_AMPLITUDE
-                                )
+                                VibrationEffect.createOneShot(300, VibrationEffect.DEFAULT_AMPLITUDE)
                             )
                         }
                     }
                 } catch (e: Exception) {
                     Log.e("TimerViewModel", "Error triggering cue", e)
                 }
-                delay(400) // Gap between repetitions
+                // you can shorten this gap if you like,
+                // but be sure your tone actually stops first!
+                delay(400)
             }
         }
     }

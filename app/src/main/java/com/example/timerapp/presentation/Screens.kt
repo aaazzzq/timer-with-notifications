@@ -552,7 +552,7 @@ fun AddCueScreen(
         initialNumberOfOptions = offsetOptions.size,
         initiallySelectedOption = offsetOptions.indexOf(offset).coerceIn(0, offsetOptions.lastIndex)
     )
-    val repeatOptions = remember { (1..5).toList() }
+    val repeatOptions = remember { (1..10).toList() }
     val repeatsPickerState = rememberPickerState(
         initialNumberOfOptions = repeatOptions.size,
         initiallySelectedOption = (repeats - 1).coerceIn(0, repeatOptions.lastIndex)
