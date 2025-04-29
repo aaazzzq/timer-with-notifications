@@ -18,12 +18,21 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File // For file-based storage example
-
+import android.content.Context
+import android.os.SystemClock
+import android.content.SharedPreferences
 
 // ---------------------------------------------------------------------------
 
 class TimerViewModel(app: Application) : AndroidViewModel(app) {
 
+    private val prefs: SharedPreferences =
+        app.getSharedPreferences("active_timer", Context.MODE_PRIVATE)
+
+    private companion object {
+        const val KEY_END_TIME  = "end_time"
+        const val KEY_ACTIVE_ID = "active_id"
+    }
     /* ---------- Preset Storage (Using internal file for slightly better robustness) ---------- */
     private val storageFile = File(app.filesDir, "timer_presets.json")
 
@@ -95,28 +104,57 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
     private var ticker: Job? = null
 
     fun startTimer(id: Long) {
-        // Ensure we don't start if already active with same ID? Or allow restart?
-        // Current logic allows restarting same timer.
         val preset = _presets.value.firstOrNull { it.id == id } ?: return
-        ticker?.cancel() // Cancel any existing ticker first
-        _active.value = ActiveTimerInternalState(preset, preset.durationMillis, true) // Start as running
+
+        val endTime = SystemClock.elapsedRealtime() + preset.durationMillis
+        prefs.edit()
+            .putLong(KEY_END_TIME,  endTime)
+            .putLong(KEY_ACTIVE_ID, id)
+            .apply()
+
+        _active.value = ActiveTimerInternalState(preset, preset.durationMillis, isRunning = true)
+        ticker?.cancel()
         scheduleTicker()
     }
 
-    fun pauseOrResume() {
-        _active.update { currentState ->
-            currentState?.copy(isRunning = !currentState.isRunning)
-        }
-        // Schedule/cancel ticker based on the *new* state
-        if (_active.value?.isRunning == true) {
-            scheduleTicker()
-        } else {
+    fun resumeIfNeeded() {
+        val endTime = prefs.getLong(KEY_END_TIME, 0L)
+        val id      = prefs.getLong(KEY_ACTIVE_ID, -1L)
+
+        if (endTime > SystemClock.elapsedRealtime() && id != -1L) {
+            val preset = _presets.value.firstOrNull { it.id == id } ?: return
+            val remaining = endTime - SystemClock.elapsedRealtime()
+
+            _active.value = ActiveTimerInternalState(preset, remaining, isRunning = true)
             ticker?.cancel()
+            scheduleTicker()
+        }
+    }
+
+    fun pauseOrResume() {
+        val state = _active.value ?: return
+
+        if (state.isRunning) {
+            // PAUSE
+            ticker?.cancel()
+            prefs.edit().remove(KEY_END_TIME).apply()
+            _active.value = state.copy(isRunning = false)
+        } else {
+            // RESUME
+            val endTime = SystemClock.elapsedRealtime() + state.millisRemaining
+            prefs.edit()
+                .putLong(KEY_END_TIME,  endTime)
+                .putLong(KEY_ACTIVE_ID, state.preset.id)
+                .apply()
+
+            _active.value = state.copy(isRunning = true)
+            scheduleTicker()
         }
     }
 
     fun cancelTimer() {
         ticker?.cancel()
+        prefs.edit().clear().apply()
         _active.value = null
     }
 
@@ -138,44 +176,35 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
 
             try {
                 while (isActive) {
-                    delay(1000)
+                    val endTime = prefs.getLong(KEY_END_TIME, 0L)
+                    val now     = SystemClock.elapsedRealtime()
+                    val remaining = endTime - now
+
                     val state = _active.value ?: break
+                    val elapsedFromStart = state.preset.durationMillis - remaining
+                    val prevElapsed      = state.preset.durationMillis - state.millisRemaining
 
-                    // Calculate the “from start” times before and after this tick
-                    val prevFromStart = state.preset.durationMillis - state.millisRemaining
-                    val nextMillis = state.millisRemaining - 1000
-                    val currFromStart = state.preset.durationMillis - nextMillis
-
-                    // Debug log: show window and all cue offsets
-                    Log.d("TimerViewModel", "Window: $prevFromStart → $currFromStart   cues=${state.preset.cues.map { it.offsetMillis }}   fired=$firedOffsets")
-
-                    // Fire any cues whose offset falls in this window
+                    // fire cues that fall between prevElapsed and elapsedFromStart (unchanged logic)
                     state.preset.cues.forEach { cue ->
-                        if (cue.offsetMillis !in firedOffsets
-                            && prevFromStart < cue.offsetMillis
-                            && currFromStart >= cue.offsetMillis
-                        ) {
-                            Log.d("TimerViewModel", "Triggering cue at ${cue.offsetMillis}ms")
+                        if (cue.offsetMillis !in firedOffsets &&
+                            prevElapsed < cue.offsetMillis &&
+                            elapsedFromStart >= cue.offsetMillis) {
+
                             firedOffsets += cue.offsetMillis
-                            withContext(Dispatchers.Main) {
-                                triggerCue(cue.type, cue.repeats, vibrator, ringtone)
-                            }
+                            withContext(Dispatchers.Main) { triggerCue(cue.type, cue.repeats, vibrator, ringtone) }
                         }
                     }
 
-                    // Update remaining time (and handle completion)
-                    if (nextMillis <= 0) {
-                        withContext(Dispatchers.Main) {
-                            triggerCue(CueType.BOTH, 3, vibrator, ringtone)
-                        }
+                    if (remaining <= 0) {
+                        withContext(Dispatchers.Main) { triggerCue(CueType.BOTH, 3, vibrator, ringtone) }
                         _active.value = state.copy(millisRemaining = 0, isRunning = false)
-                        ticker?.cancel()
+                        prefs.edit().clear().apply()
                         break
                     } else {
-                        _active.value = state.copy(millisRemaining = nextMillis)
+                        _active.value = state.copy(millisRemaining = remaining)
                     }
-                }
-            } finally {
+                    delay(1000)
+                }            } finally {
                 // Stop any ringing if we exit unexpectedly
                 withContext(Dispatchers.Main) {
                     ringtone?.stop()

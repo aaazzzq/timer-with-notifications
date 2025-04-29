@@ -16,6 +16,7 @@ import androidx.wear.compose.foundation.ExperimentalWearFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableIntStateOf
@@ -118,7 +119,7 @@ fun HomeScreen(
                     .fillMaxWidth() // Span the full width
                     .height(48.dp) // Consistent height
                     // Use primary color for background
-                    .background(WearMaterialTheme.colors.primary)
+                    .background(Color(0xFF4CAF50))
                     // Use the onCreate lambda passed into HomeScreen
                     .clickable(onClick = onCreate)
                     // Add internal padding for the content
@@ -414,7 +415,11 @@ fun EditTimerScreen(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(0.9f),
-                            enabled = (hours > 0 || minutes > 0) // Can save if duration > 0
+                            enabled = (hours > 0 || minutes > 0), // Can save if duration > 0
+                            colors = ButtonDefaults.buttonColors(
+                                backgroundColor = Color(0xFF4CAF50),
+                                contentColor    = Color.White
+                            )
                         ) {
                             M3Text("Save") // M3 Text
                         }
@@ -431,10 +436,10 @@ fun EditTimerScreen(
                                     showDeleteConfirmDialog = true
                                 },
                                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                    containerColor = M3MaterialTheme.colorScheme.errorContainer, // Use M3 error colors
-                                    contentColor = M3MaterialTheme.colorScheme.onErrorContainer
+                                    containerColor = Color(0xFFF44336),  // Material Red 500
+                                    contentColor   = Color.White
                                 ),
-                                modifier = Modifier.fillMaxWidth(0.9f)
+                                modifier = Modifier.fillMaxWidth(0.9f),
                             ) {
                                 M3Text("Delete") // M3 Text
                             }
@@ -470,7 +475,7 @@ fun EditTimerScreen(
                     ) {
                         Icon( // M3 Icon
                             imageVector = Icons.Default.Add,
-                            contentDescription = "Add Signal",
+                            contentDescription = "Add Cue",
                             tint = M3MaterialTheme.colorScheme.onPrimary // M3 onPrimary color
                         )
                         Spacer(Modifier.width(8.dp))
@@ -645,7 +650,11 @@ fun AddCueScreen(
                 M3Button(
                     onClick = onCancel,
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp) // ①
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFF44336),  // Material Red 500
+                        contentColor   = Color.White
+                    )
                 ) {
                     Text(
                         text = "Cancel",
@@ -665,7 +674,11 @@ fun AddCueScreen(
                     },
                     enabled = isOffsetPossible && !isDuplicate,
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp) // keep paddings identical
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp), // keep paddings identical
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4CAF50),
+                        contentColor   = Color.White
+                    )
                 ) {
                     Text(
                         text = "Add",
@@ -689,6 +702,10 @@ fun ActiveTimerScreen(
     onDone: () -> Unit
 ) {
     val state by vm.active.collectAsState()
+
+    LaunchedEffect(Unit) {
+        vm.resumeIfNeeded()
+    }
 
     LaunchedEffect(presetId) {
         if (state == null && presetId != null) vm.startTimer(presetId)
@@ -745,7 +762,10 @@ fun ActiveTimerScreen(
                     onClick = { vm.pauseOrResume() },
                     modifier = Modifier.size(ButtonDefaults.LargeButtonSize),
                     enabled = state != null && rem > 0,
-                    colors = ButtonDefaults.buttonColors()
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color(0xFF4CAF50),
+                        contentColor    = Color.White
+                    )
                 ) {
                     Text(if (isRunning) "Pause" else "Resume")
                 }
