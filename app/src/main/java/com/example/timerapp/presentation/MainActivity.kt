@@ -9,12 +9,17 @@ import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.LaunchedEffect
+
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             val navController = rememberSwipeDismissableNavController()
             val vm: TimerViewModel = viewModel()
+            LaunchedEffect(Unit) { vm.reAttachIfServiceRunning() }
 
             MaterialTheme {
                 SwipeDismissableNavHost(

@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -703,12 +704,10 @@ fun ActiveTimerScreen(
 ) {
     val state by vm.active.collectAsState()
 
-    LaunchedEffect(Unit) {
-        vm.resumeIfNeeded()
-    }
+    LaunchedEffect(Unit) { vm.reAttachIfServiceRunning() }
 
     LaunchedEffect(presetId) {
-        if (state == null && presetId != null) vm.startTimer(presetId)
+        if (presetId != null) vm.startTimer(presetId)
     }
 
     LaunchedEffect(state) {
